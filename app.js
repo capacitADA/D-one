@@ -1,12 +1,12 @@
 // ============================================
-// D1 GESTIÓN - App Firebase v2 (GPS + Mejoras)
+// D1 GESTIÓN - App Firebase
 // Versión: CEDIS + TIENDAS + Activos + Servicios
 // ============================================
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, writeBatch }
     from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-// Configuración Firebase D1
+// Configuración Firebase D1 (virgen)
 const firebaseConfig = {
     apiKey: "AIzaSyDw1faNff7uMXR6JbHOhZa7eA5WiiNAJNw",
     authDomain: "donecapacitada-4fa37.firebaseapp.com",
@@ -16,19 +16,19 @@ const firebaseConfig = {
     appId: "1:449540711283:web:01efe4696daafc4e215b06"
 };
 
-// Google Apps Script para Drive
+// Google Apps Script para Drive (se mantiene igual)
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwYWgupeHfhfKmvMDk_FFsTj-P9PdJfXMn3pheGjFMXK7i43AW1V8A5BD4iCSbOho9c/exec';
 
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 
-// ===== DRIVE (con manejo seguro de errores) =====
+// ===== DRIVE (igual que antes) =====
 let _driveConnected = false;
 function driveIsConnected() { return _driveConnected; }
 
 async function conectarDriveAuto() {
     try {
-        await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' });
+        const response = await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' });
         _driveConnected = true;
         console.log('✅ Drive conectado');
     } catch (e) {
@@ -55,8 +55,8 @@ async function driveUploadPDF(html, filename) {
 }
 
 // ===== DATOS GLOBALES =====
-let cedis = [];
-let tiendas = [];
+let cedis = [];        // Colección 'cedis'
+let tiendas = [];      // Colección 'tiendas'
 let equipos = [];
 let servicios = [];
 let tecnicos = [];
@@ -87,11 +87,13 @@ async function cargarDatos() {
     renderView();
 }
 
-// ===== SEMBRAR DATOS INICIALES =====
+// ===== SEMBRAR DATOS INICIALES (solo si no hay técnicos) =====
 async function sembrarDatos() {
     const snap = await getDocs(collection(db, 'tecnicos'));
     if (!snap.empty) return;
     toast('⚙️ Configurando app...');
+
+    // Superusuario: CARLOS MONSALVE
     await addDoc(collection(db, 'tecnicos'), {
         nombre: 'Carlos Monsalve',
         cedula: '0000001',
@@ -103,6 +105,8 @@ async function sembrarDatos() {
         region: 'Colombia',
         clave: '1234'
     });
+    
+    // Técnico de ejemplo (opcional)
     await addDoc(collection(db, 'tecnicos'), {
         nombre: 'Juan Perez',
         cedula: '10234568',
@@ -114,6 +118,7 @@ async function sembrarDatos() {
         region: 'Cundinamarca',
         clave: '5678'
     });
+
     toast('✅ Listo. Cédula admin: 0000001 · Clave: 1234');
 }
 
@@ -194,8 +199,8 @@ function cerrarSesion() {
 // ===== ESTADO GLOBAL =====
 let currentView = 'panel';
 let sesionActual = null;
-let selectedEntidadId = null;
-let selectedEntidadTipo = null;
+let selectedEntidadId = null;      // ID del CEDI o TIENDA actual
+let selectedEntidadTipo = null;    // 'cedi' o 'tienda'
 let selectedEquipoId = null;
 let fotosNuevas = [null, null, null];
 
@@ -230,8 +235,10 @@ function renderView() {
     if (!sesionActual && currentView !== 'panel' && currentView !== 'tecnicos') {
         currentView = 'panel';
     }
+    
     const main = document.getElementById('mainContent');
     document.getElementById('botnavEl').style.display = 'flex';
+
     switch (currentView) {
         case 'panel':         main.innerHTML = renderPanel(); break;
         case 'cedis':         main.innerHTML = renderCedis(); break;
@@ -252,6 +259,7 @@ function renderPanel() {
     const totalEquipos = equipos.length;
     const serviciosMes = servicios.filter(s => s.fecha?.startsWith(getMesActual())).length;
     const mantPendientes = servicios.filter(s => s.proximoMantenimiento && s.proximoMantenimiento >= new Date().toISOString().slice(0,10)).length;
+
     return `<div class="page">
         <div class="panel-banner" style="background:#0d4a3a;color:white;padding:20px;text-align:center;">
             <div class="panel-banner-sub">Gestión de Mantenimiento</div>
@@ -267,7 +275,7 @@ function renderPanel() {
     </div>`;
 }
 
-// ===== CEDIS con GPS =====
+// ===== CEDIS =====
 function renderCedis() {
     return `<div class="page">
         <div class="sec-head"><h2>CEDIS (${cedis.length})</h2><button class="btn btn-blue btn-sm" onclick="modalNuevaEntidad('cedi')">+ Nuevo CEDI</button></div>
@@ -282,7 +290,6 @@ function renderCedis() {
                 <div class="cc-row">📍 ${c.ciudad} · ${c.region || 'Sin región'}</div>
                 <div class="cc-row">📞 ${c.telefono}</div>
                 <div class="cc-row">📧 ${c.email || ''}</div>
-                ${c.lat && c.lng ? `<div class="cc-row">📍 GPS: ${c.lat}, ${c.lng}</div>` : ''}
                 <div class="cc-meta">${getEquiposEntidad(c.id, 'cedi').length} activo(s) · ${getServiciosEntidad(c.id, 'cedi').length} servicio(s)</div>
                 <button class="link-btn" onclick="goTo('detalle','${c.id}','cedi')">Ver activos →</button>
             </div>`).join('')}
@@ -304,7 +311,6 @@ function renderTiendas() {
                 <div class="cc-row">📍 ${t.ciudad} · ${t.region || 'Sin región'}</div>
                 <div class="cc-row">📞 ${t.telefono}</div>
                 <div class="cc-row">📧 ${t.email || ''}</div>
-                ${t.lat && t.lng ? `<div class="cc-row">📍 GPS: ${t.lat}, ${t.lng}</div>` : ''}
                 <div class="cc-meta">${getEquiposEntidad(t.id, 'tienda').length} activo(s) · ${getServiciosEntidad(t.id, 'tienda').length} servicio(s)</div>
                 <button class="link-btn" onclick="goTo('detalle','${t.id}','tienda')">Ver activos →</button>
             </div>`).join('')}
@@ -321,7 +327,7 @@ function filtrarEntidades(valor, tipo) {
     });
 }
 
-// Detalle de entidad - muestra activos con formato TIPO MODELO - MARCA
+// Detalle de entidad (CEDI o TIENDA) - muestra sus activos
 function renderDetalleEntidad() {
     let entidad;
     if (selectedEntidadTipo === 'cedi') entidad = getCedi(selectedEntidadId);
@@ -335,28 +341,25 @@ function renderDetalleEntidad() {
             <div class="cc-row">📞 ${entidad.telefono}</div>
             ${entidad.email ? `<div class="cc-row">📧 ${entidad.email}</div>` : ''}
             <div class="cc-row">📍 ${entidad.direccion}</div>
-            ${entidad.lat && entidad.lng ? `<div class="cc-row">📍 GPS: ${entidad.lat}, ${entidad.lng}</div>` : ''}
         </div>
         <div style="display:flex;justify-content:space-between;margin:0 16px 0.65rem;"><span style="font-weight:700;">Activos (${eqs.length})</span><button class="btn btn-blue btn-sm" onclick="modalNuevoEquipo('${selectedEntidadId}','${selectedEntidadTipo}')">+ Activo</button></div>
-        ${eqs.map(e => {
-            const nombreFormateado = `${e.tipo || ''} ${e.modelo} - ${e.marca}`.trim();
-            return `<div class="ec" style="margin:0 16px 12px;">
-                <div style="display:flex;justify-content:space-between;">
-                    <div><div class="ec-name">${nombreFormateado}</div><div class="ec-meta">📍 ${e.ubicacion || 'Sin ubicación'} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>
-                    ${esAdmin() ? `<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>` : ''}
-                </div>
-                <div class="ec-btns">
-                    <button class="ab" onclick="goTo('historial',null,null,'${e.id}')">📋 Servicios</button>
-                    <button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button>
-                    <button class="ab" onclick="generarInformePDF('${e.id}')">📄 PDF</button>
-                    <button class="ab" onclick="modalQR('${e.id}')">📱 QR</button>
-                </div>
-            </div>`;
-        }).join('')}
+        ${eqs.map(e => `
+        <div class="ec" style="margin:0 16px 12px;">
+            <div style="display:flex;justify-content:space-between;">
+                <div><div class="ec-name">${e.marca} ${e.modelo}</div><div class="ec-meta">📍 ${e.ubicacion} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>
+                ${esAdmin() ? `<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>` : ''}
+            </div>
+            <div class="ec-btns">
+                <button class="ab" onclick="goTo('historial',null,null,'${e.id}')">📋 Servicios</button>
+                <button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button>
+                <button class="ab" onclick="generarInformePDF('${e.id}')">📄 PDF</button>
+                <button class="ab" onclick="modalQR('${e.id}')">📱 QR</button>
+            </div>
+        </div>`).join('')}
     </div>`;
 }
 
-// Historial de servicios con estado para reparaciones
+// Historial de servicios de un equipo
 function renderHistorialEquipo() {
     const e = getEq(selectedEquipoId);
     if (!e) { goTo('panel'); return ''; }
@@ -369,16 +372,14 @@ function renderHistorialEquipo() {
         entidadNombre = t ? t.nombre : '';
     }
     const ss = getServiciosEquipo(e.id).sort((a,b) => new Date(b.fecha)-new Date(a.fecha));
-    const nombreEq = `${e.tipo || ''} ${e.modelo} - ${e.marca}`.trim();
     return `<div class="page">
-        <div class="det-hdr"><button class="back" onclick="goTo('detalle','${e.entidadId}','${e.entidadTipo}')">← Volver</button><div><div class="ec-name">${nombreEq}</div><div class="ec-meta">${e.ubicacion || 'Sin ubicación'} · ${entidadNombre}</div></div></div>
+        <div class="det-hdr"><button class="back" onclick="goTo('detalle','${e.entidadId}','${e.entidadTipo}')">← Volver</button><div><div class="ec-name">${e.marca} ${e.modelo}</div><div class="ec-meta">${e.ubicacion} · ${entidadNombre}</div></div></div>
         <div style="margin:0 16px 2rem;"><span style="font-weight:700;">Historial (${ss.length})</span></div>
         ${ss.map(s => `
         <div class="si" style="margin:0 16px 12px;">
             <div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span style="font-size:2rem;color:var(--hint);">${fmtFecha(s.fecha)}</span></div>
             <div class="si-info">🔧 ${s.tecnico}</div>
             <div class="si-info">${s.descripcion}</div>
-            ${s.estadoReparacion ? `<div class="si-info" style="font-weight:bold;">✅ Estado final: ${s.estadoReparacion}</div>` : ''}
             ${s.proximoMantenimiento ? `<div class="si-info" style="color:var(--gold);">📅 Próximo: ${fmtFecha(s.proximoMantenimiento)}</div>` : ''}
             <div class="fotos-strip">${(s.fotos||[]).map(f => `<img class="fthumb" src="${f}" loading="lazy">`).join('')}</div>
             <div class="si-top" style="justify-content:flex-end;margin-top:4px;">
@@ -389,7 +390,7 @@ function renderHistorialEquipo() {
     </div>`;
 }
 
-// ===== CRUD ENTIDADES (CEDI / TIENDA) con GPS =====
+// ===== CRUD ENTIDADES (CEDI / TIENDA) =====
 function modalNuevaEntidad(tipo) {
     const titulo = tipo === 'cedi' ? 'Nuevo CEDI' : 'Nueva Tienda';
     showModal(`<div class="modal"><div class="modal-h"><h3>${titulo}</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
@@ -399,8 +400,6 @@ function modalNuevaEntidad(tipo) {
         <label class="fl">Teléfono *</label><input class="fi" id="entTelefono" type="tel">
         <label class="fl">Email</label><input class="fi" id="entEmail">
         <label class="fl">Dirección *</label><input class="fi" id="entDireccion">
-        <div class="fr"><div><label class="fl">Latitud</label><input class="fi" id="entLat" type="number" step="any"></div><div><label class="fl">Longitud</label><input class="fi" id="entLng" type="number" step="any"></div></div>
-        <button class="btn btn-gray btn-sm" onclick="obtenerUbicacionActual()">📍 Usar mi ubicación</button>
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarEntidad('${tipo}')">Guardar</button></div>
     </div></div>`);
 }
@@ -412,15 +411,11 @@ async function guardarEntidad(tipo) {
     const telefono = document.getElementById('entTelefono')?.value.trim();
     const email = document.getElementById('entEmail')?.value.trim();
     const direccion = document.getElementById('entDireccion')?.value.trim();
-    const lat = parseFloat(document.getElementById('entLat')?.value);
-    const lng = parseFloat(document.getElementById('entLng')?.value);
     if (!nombre || !ciudad || !region || !telefono || !direccion) { toast('⚠️ Complete campos obligatorios'); return; }
     const coleccion = tipo === 'cedi' ? 'cedis' : 'tiendas';
     try {
         await addDoc(collection(db, coleccion), {
             nombre, ciudad, region, telefono, email: email || '', direccion,
-            lat: isNaN(lat) ? null : lat,
-            lng: isNaN(lng) ? null : lng,
             fechaCreacion: new Date().toISOString().split('T')[0]
         });
         closeModal();
@@ -440,16 +435,12 @@ function modalEditarEntidad(tipo, id) {
         <label class="fl">Teléfono</label><input class="fi" id="eTelefono" value="${ent.telefono}">
         <label class="fl">Email</label><input class="fi" id="eEmail" value="${ent.email || ''}">
         <label class="fl">Dirección</label><input class="fi" id="eDireccion" value="${ent.direccion}">
-        <div class="fr"><div><label class="fl">Latitud</label><input class="fi" id="eLat" value="${ent.lat || ''}" type="number" step="any"></div><div><label class="fl">Longitud</label><input class="fi" id="eLng" value="${ent.lng || ''}" type="number" step="any"></div></div>
-        <button class="btn btn-gray btn-sm" onclick="obtenerUbicacionActualEditar()">📍 Usar mi ubicación</button>
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarEntidad('${tipo}','${id}')">Guardar</button></div>
     </div></div>`);
 }
 
 async function actualizarEntidad(tipo, id) {
     const coleccion = tipo === 'cedi' ? 'cedis' : 'tiendas';
-    const lat = parseFloat(document.getElementById('eLat')?.value);
-    const lng = parseFloat(document.getElementById('eLng')?.value);
     try {
         await updateDoc(doc(db, coleccion, id), {
             nombre: document.getElementById('eNombre').value,
@@ -457,32 +448,12 @@ async function actualizarEntidad(tipo, id) {
             region: document.getElementById('eRegion').value,
             telefono: document.getElementById('eTelefono').value,
             email: document.getElementById('eEmail').value,
-            direccion: document.getElementById('eDireccion').value,
-            lat: isNaN(lat) ? null : lat,
-            lng: isNaN(lng) ? null : lng
+            direccion: document.getElementById('eDireccion').value
         });
         closeModal();
         await cargarDatos();
         toast('✅ Actualizado');
     } catch(err) { toast('❌ Error: ' + err.message); }
-}
-
-function obtenerUbicacionActual() {
-    if (!navigator.geolocation) { toast('Geolocalización no soportada'); return; }
-    navigator.geolocation.getCurrentPosition(pos => {
-        document.getElementById('entLat').value = pos.coords.latitude;
-        document.getElementById('entLng').value = pos.coords.longitude;
-        toast('📍 Coordenadas cargadas');
-    }, err => toast('❌ Error obteniendo ubicación'));
-}
-
-function obtenerUbicacionActualEditar() {
-    if (!navigator.geolocation) { toast('Geolocalización no soportada'); return; }
-    navigator.geolocation.getCurrentPosition(pos => {
-        document.getElementById('eLat').value = pos.coords.latitude;
-        document.getElementById('eLng').value = pos.coords.longitude;
-        toast('📍 Coordenadas cargadas');
-    }, err => toast('❌ Error obteniendo ubicación'));
 }
 
 function modalEliminarEntidad(tipo, id) {
@@ -506,13 +477,13 @@ async function eliminarEntidadCompleta(tipo, id) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== CRUD EQUIPOS (ACTIVOS) - Ubicación NO obligatoria =====
+// ===== CRUD EQUIPOS (ACTIVOS) =====
 function modalNuevoEquipo(entidadId, entidadTipo) {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo activo</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <div class="fr"><div><label class="fl">Marca *</label><input class="fi" id="eqMarca"></div><div><label class="fl">Modelo *</label><input class="fi" id="eqModelo"></div></div>
         <label class="fl">Serie</label><input class="fi" id="eqSerie">
-        <label class="fl">Ubicación</label><input class="fi" id="eqUbicacion" placeholder="Opcional">
-        <label class="fl">Tipo</label><input class="fi" id="eqTipo" placeholder="Ej: Montacarga, UPS, Planta...">
+        <label class="fl">Ubicación *</label><input class="fi" id="eqUbicacion">
+        <label class="fl">Tipo</label><input class="fi" id="eqTipo">
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarEquipo('${entidadId}','${entidadTipo}')">Guardar</button></div>
     </div></div>`);
 }
@@ -520,13 +491,14 @@ function modalNuevoEquipo(entidadId, entidadTipo) {
 async function guardarEquipo(entidadId, entidadTipo) {
     const marca = document.getElementById('eqMarca')?.value.trim();
     const modelo = document.getElementById('eqModelo')?.value.trim();
-    if (!marca || !modelo) { toast('⚠️ Marca y modelo requeridos'); return; }
+    const ubicacion = document.getElementById('eqUbicacion')?.value.trim();
+    if (!marca || !modelo || !ubicacion) { toast('⚠️ Marca, modelo y ubicación requeridos'); return; }
     try {
         await addDoc(collection(db, 'equipos'), {
             entidadId, entidadTipo,
             marca, modelo,
             serie: document.getElementById('eqSerie')?.value || '',
-            ubicacion: document.getElementById('eqUbicacion')?.value || '',
+            ubicacion,
             tipo: document.getElementById('eqTipo')?.value || ''
         });
         closeModal();
@@ -541,7 +513,7 @@ function modalEditarEquipo(eid) {
     showModal(`<div class="modal"><div class="modal-h"><h3>Editar activo</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <div class="fr"><div><label class="fl">Marca</label><input class="fi" id="eMarca" value="${eq.marca}"></div><div><label class="fl">Modelo</label><input class="fi" id="eModelo" value="${eq.modelo}"></div></div>
         <label class="fl">Serie</label><input class="fi" id="eSerie" value="${eq.serie || ''}">
-        <label class="fl">Ubicación</label><input class="fi" id="eUbicacion" value="${eq.ubicacion || ''}">
+        <label class="fl">Ubicación</label><input class="fi" id="eUbicacion" value="${eq.ubicacion}">
         <label class="fl">Tipo</label><input class="fi" id="eTipoEq" value="${eq.tipo || ''}">
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarEquipo('${eid}')">Guardar</button></div>
     </div></div>`);
@@ -577,7 +549,7 @@ async function eliminarEquipoCompleto(eid) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== SERVICIOS con estado de reparación =====
+// ===== SERVICIOS (similar a OLM pero adaptado) =====
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -593,10 +565,6 @@ async function guardarServicio(eid) {
     const tipo = document.getElementById('sTipo').value;
     const fecha = document.getElementById('sFecha').value;
     const prox = tipo === 'Mantenimiento' ? (document.getElementById('proxFecha')?.value || null) : null;
-    let estadoReparacion = null;
-    if (tipo === 'Reparacion') {
-        estadoReparacion = document.getElementById('estadoReparacion')?.value || null;
-    }
     const fotosBase64 = [];
     for (let i = 0; i < fotosNuevas.length; i++) {
         if (fotosNuevas[i]) {
@@ -611,7 +579,6 @@ async function guardarServicio(eid) {
             tecnico: sesionActual?.nombre || '',
             descripcion: desc,
             proximoMantenimiento: prox,
-            estadoReparacion: estadoReparacion,
             fotos: fotosBase64
         });
         closeModal();
@@ -624,10 +591,8 @@ async function guardarServicio(eid) {
 
 function onTipoChange() {
     const tipo = document.getElementById('sTipo')?.value;
-    const mantBox = document.getElementById('mantBox');
-    const estadoBox = document.getElementById('estadoRepBox');
-    if (mantBox) mantBox.classList.toggle('hidden', tipo !== 'Mantenimiento');
-    if (estadoBox) estadoBox.classList.toggle('hidden', tipo !== 'Reparacion');
+    const box = document.getElementById('mantBox');
+    if (box) box.classList.toggle('hidden', tipo !== 'Mantenimiento');
 }
 
 function previewFoto(input, idx) {
@@ -670,7 +635,7 @@ function modalNuevoServicio(eid) {
         <div class="modal-b">
             <div style="background:var(--bg2);padding:0.55rem;border-radius:8px;margin-bottom:0.65rem;">
                 <strong>${entidadNombre}</strong><br>
-                <span style="font-size:0.75rem;">${e.tipo || ''} ${e.modelo} - ${e.marca} · 📍 ${e.ubicacion || 'Sin ubicación'}</span>
+                <span style="font-size:0.75rem;">${e.marca} ${e.modelo} · 📍 ${e.ubicacion}</span>
             </div>
             <div class="fr">
                 <div><label class="fl">Tipo *</label><select class="fi" id="sTipo" onchange="onTipoChange()"><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select></div>
@@ -678,21 +643,12 @@ function modalNuevoServicio(eid) {
             </div>
             <label class="fl">Técnico</label>
             <input class="fi" id="sTecnico" value="${sesionActual?.nombre||''}" readonly>
+            <label class="fl">Diagnóstico / Descripción *</label>
+            <textarea class="fi" id="sDesc" rows="3" placeholder="Trabajo realizado..."></textarea>
             <div class="mant-box hidden" id="mantBox">
                 <label class="fl">📅 Próximo mantenimiento</label>
                 <input class="fi" type="date" id="proxFecha">
             </div>
-            <div class="estado-rep-box hidden" id="estadoRepBox">
-                <label class="fl">🔧 Estado final (reparación)</label>
-                <select class="fi" id="estadoReparacion">
-                    <option value="">Seleccione</option>
-                    <option value="Operativo">✅ Operativo</option>
-                    <option value="Fuera de Servicio">⚠️ Fuera de Servicio</option>
-                    <option value="Dar de Baja">🗑️ Dar de Baja</option>
-                </select>
-            </div>
-            <label class="fl">Diagnóstico / Descripción *</label>
-            <textarea class="fi" id="sDesc" rows="3" placeholder="Trabajo realizado..."></textarea>
             <label class="fl">📷 Fotos (max 3)</label>
             <div class="foto-row">
                 ${[0,1,2].map(i => `<div style="flex:1;"><div class="fslot" id="fslot${i}" onclick="document.getElementById('finput${i}').click()"><div class="fslot-plus">+</div><div class="fslot-lbl">Foto ${i+1}</div><input type="file" id="finput${i}" accept="image/*" style="display:none" onchange="previewFoto(this,${i})"></div></div>`).join('')}
@@ -713,7 +669,6 @@ function modalEditarServicio(sid) {
         <div class="fr"><div><label class="fl">Tipo</label><select class="fi" id="esTipo"><option ${s.tipo==='Mantenimiento'?'selected':''}>Mantenimiento</option><option ${s.tipo==='Reparacion'?'selected':''}>Reparacion</option><option ${s.tipo==='Instalacion'?'selected':''}>Instalacion</option></select></div><div><label class="fl">Fecha</label><input class="fi" type="date" id="esFecha" value="${s.fecha}"></div></div>
         <label class="fl">Diagnóstico</label><textarea class="fi" id="esDesc" rows="3">${s.descripcion}</textarea>
         <label class="fl">Próximo mantenimiento</label><input class="fi" type="date" id="esProx" value="${s.proximoMantenimiento||''}">
-        ${s.tipo === 'Reparacion' ? `<label class="fl">Estado final</label><select class="fi" id="esEstadoRep"><option ${s.estadoReparacion==='Operativo'?'selected':''}>Operativo</option><option ${s.estadoReparacion==='Fuera de Servicio'?'selected':''}>Fuera de Servicio</option><option ${s.estadoReparacion==='Dar de Baja'?'selected':''}>Dar de Baja</option></select>` : ''}
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarServicio('${sid}')">Guardar</button></div>
     </div></div>`);
 }
@@ -723,14 +678,8 @@ async function actualizarServicio(sid) {
     const fecha = document.getElementById('esFecha')?.value;
     const desc = document.getElementById('esDesc')?.value?.trim();
     const prox = document.getElementById('esProx')?.value || null;
-    let estadoRep = null;
-    if (tipo === 'Reparacion') {
-        estadoRep = document.getElementById('esEstadoRep')?.value || null;
-    }
-    const updateData = { tipo, fecha, descripcion: desc, proximoMantenimiento: prox };
-    if (estadoRep !== null) updateData.estadoReparacion = estadoRep;
     try {
-        await updateDoc(doc(db, 'servicios', sid), updateData);
+        await updateDoc(doc(db, 'servicios', sid), { tipo, fecha, descripcion: desc, proximoMantenimiento: prox });
         closeModal();
         await cargarDatos();
         toast('✅ Servicio actualizado');
@@ -743,7 +692,7 @@ async function eliminarServicio(sid) {
     catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== RENDER SERVICIOS =====
+// ===== RENDER SERVICIOS (con filtros) =====
 function renderServicios() {
     const años = [...new Set(servicios.map(s=>s.fecha?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a);
     const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -794,13 +743,11 @@ function aplicarFiltros() {
                 entidadNombre = t ? t.nombre : '';
             }
         }
-        const nombreEq = e ? `${e.tipo || ''} ${e.modelo} - ${e.marca}`.trim() : 'N/A';
         return `<div class="si" style="margin:0 16px 12px;">
             <div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div>
-            <div class="si-info">🏢 ${entidadNombre} · ${nombreEq}</div>
-            <div class="si-info">📍 ${e?.ubicacion || 'Sin ubicación'} · 🔧 ${s.tecnico}</div>
+            <div class="si-info">🏢 ${entidadNombre} · ${e?.marca||''} ${e?.modelo||''}</div>
+            <div class="si-info">📍 ${e?.ubicacion||''} · 🔧 ${s.tecnico}</div>
             <div class="si-info">${s.descripcion}</div>
-            ${s.estadoReparacion ? `<div class="si-info" style="font-weight:bold;">✅ Estado final: ${s.estadoReparacion}</div>` : ''}
             ${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Próximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}
         </div>`;
     }).join('');
@@ -838,12 +785,11 @@ function renderMantenimientos() {
                                 entidadNombre = t ? t.nombre : '';
                             }
                         }
-                        const nombreEq = e ? `${e.tipo || ''} ${e.modelo} - ${e.marca}`.trim() : 'N/A';
                         return `<tr>
                             ${i===0?`<td rowspan="${lista.length}" style="font-weight:700;background:var(--bg2);">${mes}</td>`:''}
                             <td>${fmtFecha(m.proximoMantenimiento)}</td>
                             <td>${entidadNombre}</td>
-                            <td>${nombreEq}</td>
+                            <td>${e?`${e.marca} ${e.modelo}`:'N/A'}</td>
                             <td><button class="rec-btn" onclick="modalRecordar('${e?.id}','${m.proximoMantenimiento}')">📱</button></td>
                         </tr>`;
                     }).join('');
@@ -869,7 +815,7 @@ function modalRecordar(equipoId, fecha) {
     }
     if (!telefono) { toast('⚠️ No hay teléfono registrado'); return; }
     const fechaF = fmtFechaLarga(fecha);
-    const msg = `Hola *${destinatario}*, recordatorio: activo *${e.tipo||''} ${e.modelo} - ${e.marca}* (${e.ubicacion}) requiere mantenimiento el *${fechaF}*. Por favor confirmar. D1 Mantenimiento.`;
+    const msg = `Hola *${destinatario}*, recordatorio: activo *${e.marca} ${e.modelo}* (${e.ubicacion}) requiere mantenimiento el *${fechaF}*. Por favor confirmar. D1 Mantenimiento.`;
     showModal(`<div class="modal"><div class="modal-h"><h3>📱 Recordatorio WhatsApp</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <div class="ec-meta">Para <strong>${destinatario}</strong> · 📞 ${telefono}</div>
         <div class="wa-bubble">${msg}</div>
@@ -886,7 +832,7 @@ function enviarWhatsApp(tel) {
     toast('📱 WhatsApp abierto');
 }
 
-// ===== TÉCNICOS (sin cambios) =====
+// ===== TÉCNICOS (igual que OLM) =====
 function renderTecnicos() {
     return `<div class="page">
         <div class="sec-head"><h2>Técnicos (${tecnicos.length})</h2>${esAdmin() ? `<button class="btn btn-blue btn-sm" onclick="modalNuevoTecnico()">+ Nuevo</button>` : ''}</div>
@@ -1014,7 +960,7 @@ async function eliminarTecnico(tid) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== PDF, QR, y otras utilidades (con formato de nombre) =====
+// ===== PDF, QR, y otras utilidades (simplificadas, se mantienen funcionales) =====
 function generarInformePDF(eid) {
     const e = getEq(eid);
     if (!e) return;
@@ -1035,9 +981,6 @@ function generarInformePDF(eid) {
         const proxHTML = (s.tipo === 'Mantenimiento' && s.proximoMantenimiento)
             ? `<div style="color:#b45309;font-size:16px;margin-top:4px;">📅 Próximo mantenimiento: ${fmtFecha(s.proximoMantenimiento)}</div>`
             : '';
-        const estadoHTML = (s.tipo === 'Reparacion' && s.estadoReparacion)
-            ? `<div style="font-weight:bold;margin-top:4px;">✅ Estado final: ${s.estadoReparacion}</div>`
-            : '';
         return `<div style="border:1px solid #d1d5db;border-radius:8px;padding:12px;margin-bottom:10px;page-break-inside:avoid;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                 <span style="background:${s.tipo==='Mantenimiento'?'#1d4ed8':s.tipo==='Reparacion'?'#dc2626':'#15803d'};color:white;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">${s.tipo}</span>
@@ -1045,11 +988,11 @@ function generarInformePDF(eid) {
             </div>
             <div style="font-size:16px;color:#374151;margin:3px 0;">🔧 ${s.tecnico}</div>
             <div style="font-size:16px;color:#111;margin:3px 0;">${s.descripcion}</div>
-            ${estadoHTML}${fotosHTML}${proxHTML}
+            ${fotosHTML}${proxHTML}
         </div>`;
     }).join('');
-    const nombreEq = `${e.tipo || ''} ${e.modelo} - ${e.marca}`.trim();
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Informe_${nombreEq.replace(/\s/g,'_')}</title>
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Informe_${e.marca}_${e.modelo}</title>
     <style>@page{size:letter;margin:15mm;}body{font-family:Arial,sans-serif;}</style></head><body>
     <div style="display:flex;align-items:center;border-bottom:3px solid #0d4a3a;padding-bottom:10px;margin-bottom:12px;">
         <img src="${LOGO}" style="height:64px;margin-right:18px;" onerror="this.style.display='none'">
@@ -1057,7 +1000,7 @@ function generarInformePDF(eid) {
     </div>
     <table style="width:100%;border-collapse:collapse;">
         <tr><td style="padding:6px;background:#f1f5f9;"><strong>Entidad:</strong> ${entidadNombre}</td><td style="padding:6px;background:#f1f5f9;"><strong>Fecha:</strong> ${new Date().toLocaleString()}</td></tr>
-        <tr><td colspan="2" style="padding:6px;"><strong>Activo:</strong> ${nombreEq} | Serie: ${e.serie||'N/A'} | Ubicación: ${e.ubicacion || 'Sin ubicación'}</td></tr>
+        <tr><td colspan="2" style="padding:6px;"><strong>Activo:</strong> ${e.tipo||''} ${e.marca} ${e.modelo} | Serie: ${e.serie||'N/A'} | Ubicación: ${e.ubicacion}</td></tr>
     </table>
     <div style="background:#0d4a3a;color:white;padding:7px;margin:10px 0;">HISTORIAL DE SERVICIOS (${ss.length})</div>
     ${serviciosHTML}
@@ -1106,8 +1049,7 @@ function manejarRutaQR() {
     if (topbar) topbar.style.display = 'none';
     if (botnav) botnav.style.display = 'none';
     main.style.background = 'white';
-    const nombreEq = `${e.tipo || ''} ${e.modelo} - ${e.marca}`.trim();
-    const waMsg = encodeURIComponent(`Hola, necesito soporte para el equipo ${nombreEq} (${e.ubicacion || 'ubicación no especificada'}) de ${entidadNombre}.`);
+    const waMsg = encodeURIComponent(`Hola, necesito soporte para el equipo ${e.marca} ${e.modelo} (${e.ubicacion}) de ${entidadNombre}.`);
     const waUrl = `https://wa.me/${telefono ? '57' + telefono.replace(/\D/g,'') : '573114831801'}?text=${waMsg}`;
     main.innerHTML = `<div style="max-width:600px;margin:0 auto;padding:1.5rem;">
         <div style="text-align:center;margin-bottom:0.75rem;"><img src="https://github.com/capacitADA/D-one/blob/main/D1_logo.png?raw=true" style="height:56px;"></div>
@@ -1115,13 +1057,12 @@ function manejarRutaQR() {
             <div>¿Necesitas soporte?</div><div style="font-size:2rem;font-weight:700;">${telefono || '311 483 1801'}</div>
         </div>
         <div style="border:1px solid #ccc;border-radius:12px;padding:1rem;margin-bottom:0.75rem;">
-            <h3>${nombreEq}</h3><p>📍 ${e.ubicacion || 'Sin ubicación'}</p><p>🏢 ${entidadNombre}</p><p>Serie: ${e.serie || 'N/A'}</p>
+            <h3>${e.marca} ${e.modelo}</h3><p>📍 ${e.ubicacion}</p><p>🏢 ${entidadNombre}</p><p>Serie: ${e.serie || 'N/A'}</p>
         </div>
         <a href="${waUrl}" target="_blank" style="display:block;background:#25D366;color:white;padding:14px;border-radius:12px;text-align:center;text-decoration:none;margin-bottom:1rem;">📱 Contactar por WhatsApp</a>
         <h3>Historial (${ss.length})</h3>
         ${ss.map(s => `<div style="border:1px solid #d1ede0;border-radius:10px;padding:0.85rem;margin-bottom:0.65rem;">
             <div><strong>${s.tipo}</strong> - ${fmtFecha(s.fecha)}</div><div>${s.descripcion}</div>
-            ${s.estadoReparacion ? `<div style="font-weight:bold;">✅ Estado: ${s.estadoReparacion}</div>` : ''}
             ${s.proximoMantenimiento ? `<div style="color:#b45309;">📅 Próximo: ${fmtFecha(s.proximoMantenimiento)}</div>` : ''}
         </div>`).join('')}
     </div>`;
@@ -1166,8 +1107,6 @@ window.modalEditarTecnico = modalEditarTecnico;
 window.guardarTecnico = guardarTecnico;
 window.actualizarTecnico = actualizarTecnico;
 window.eliminarTecnico = eliminarTecnico;
-window.obtenerUbicacionActual = obtenerUbicacionActual;
-window.obtenerUbicacionActualEditar = obtenerUbicacionActualEditar;
 
 document.querySelectorAll('.bni').forEach(btn => {
     btn.addEventListener('click', () => {
