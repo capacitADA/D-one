@@ -3,91 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <!-- Tema cambiado a rojo -->
-    <meta name="theme-color" content="#b91c1c">
+    <meta name="theme-color" content="#0d4a3a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>OLM Ingeniería SAS</title>
     <link rel="stylesheet" href="styles.css">
-    <style>
-        /* Sobrescribir todos los colores verdes por rojo */
-        /* Colores originales: #0d4a3a (verde oscuro), #15803d (verde medio), #1d4ed8 (azul) se mantiene, pero cambiamos verdes */
-        .topbar {
-            background: #b91c1c !important;
-        }
-        .botnav .bni.active {
-            color: #b91c1c !important;
-            border-top-color: #b91c1c !important;
-        }
-        .botnav .bni.active .bni-ico {
-            color: #b91c1c !important;
-        }
-        .btn-blue {
-            background: #b91c1c !important;
-        }
-        .btn-blue:hover {
-            background: #991b1b !important;
-        }
-        .gold-box, .anual-box, .mensual-box, .header-box {
-            border-top-color: #b91c1c !important;
-        }
-        .badge.b-blue {
-            background: #b91c1c !important;
-        }
-        .link-btn {
-            color: #b91c1c !important;
-        }
-        .ec-btns .ab {
-            border-color: #b91c1c !important;
-            color: #b91c1c !important;
-        }
-        .ec-btns .ab:hover {
-            background: #b91c1c !important;
-            color: white !important;
-        }
-        .rec-btn {
-            background: #b91c1c !important;
-        }
-        .btn-wa {
-            background: #b91c1c !important;
-        }
-        .btn-wa:hover {
-            background: #991b1b !important;
-        }
-        .modal-h {
-            background: #b91c1c !important;
-        }
-        .info-box a.map-link {
-            color: #b91c1c !important;
-        }
-        /* Cualquier otro elemento que pudiera tener verde */
-        .topbar-rol-badge {
-            background: #b91c1c !important;
-        }
-        .tc-rol-badge.rol-admin {
-            background: #b91c1c !important;
-        }
-        .pin-digit.active {
-            border-bottom-color: #b91c1c !important;
-        }
-        .num-btn.ok {
-            background: #b91c1c !important;
-        }
-        .fotos-strip .fthumb {
-            border-color: #b91c1c !important;
-        }
-        .si .badge.b-blue {
-            background: #b91c1c !important;
-        }
-        .panel-box.header-box {
-            background: #b91c1c !important;
-        }
-        /* Asegurar que ningún verde se cuele */
-        :root {
-            --gold: #b91c1c !important;
-            --green: #b91c1c !important;
-        }
-    </style>
 </head>
 <body>
     <div class="app" id="appRoot">
@@ -107,8 +27,7 @@
         </div>
         <nav class="botnav" id="botnavEl">
             <button class="bni active" data-page="panel"><span class="bni-ico">📊</span><span class="bni-lbl">Panel</span></button>
-            <!-- Cambiado "Clientes" por "CEDI" -->
-            <button class="bni" data-page="clientes"><span class="bni-ico">👥</span><span class="bni-lbl">CEDI</span></button>
+            <button class="bni" data-page="clientes"><span class="bni-ico">👥</span><span class="bni-lbl">CEDIs</span></button>
             <button class="bni" data-page="equipos"><span class="bni-ico">🔧</span><span class="bni-lbl">Activos</span></button>
             <button class="bni" data-page="servicios"><span class="bni-ico">📋</span><span class="bni-lbl">Servicios</span></button>
             <button class="bni" data-page="mantenimientos"><span class="bni-ico">📅</span><span class="bni-lbl">Agenda</span></button>
