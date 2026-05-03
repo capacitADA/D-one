@@ -418,7 +418,7 @@ function renderDetalleCliente() {
         ${eqs.map(e => `
         <div class="ec">
             <div style="display:flex;justify-content:space-between;">
-                <div><div class="ec-name">${e.marca} ${e.modelo}</div><div class="ec-meta">📍 ${e.ubicacion} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>
+                <div><div class="ec-name">${e.marca} ${e.tipo || ''} ${e.modelo}</div><div class="ec-meta">📍 ${e.ubicacion} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>
                 ${esAdmin() ? `<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>` : ''}
             </div>
             <div class="ec-btns">
@@ -437,7 +437,7 @@ function renderHistorial() {
     const c = getCl(e.clienteId);
     const ss = getServiciosEquipo(e.id).sort((a,b) => new Date(b.fecha)-new Date(a.fecha));
     return `<div class="page">
-        <div class="det-hdr"><button class="back" onclick="goTo('detalle','${e.clienteId}')">← Volver</button><div><div class="ec-name">${e.marca} ${e.modelo}</div><div class="ec-meta">${e.ubicacion} · ${c?.nombre}</div></div></div>
+        <div class="det-hdr"><button class="back" onclick="goTo('detalle','${e.clienteId}')">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo || ''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion} · ${c?.nombre}</div></div></div>
         <div style="margin-bottom:2rem;"><span style="font-weight:700;">Historial (${ss.length})</span></div>
         ${ss.map(s => `
         <div class="si">
@@ -580,7 +580,7 @@ function renderTecnicos() {
             </div>`;
         }).join('')}
         ${esAdmin() ? `<div style="margin-top:1.2rem;background:white;border-radius:12px;padding:0.85rem;">
-            <div style="font-weight:700;">🏪 Tiendas Jeronimo Martins</div>
+            <div style="font-weight:700;">🏪 Tiendas Listado</div>
             <div class="ec-meta">Version: ${jmcTiendasVersion} · ${jmcTiendas.length} tiendas</div>
             <label class="btn btn-blue btn-sm" style="display:inline-block;margin:4px;">📥 Subir CSV<input type="file" accept=".csv" style="display:none;" onchange="subirCSVJMC(this)"></label>
             <button class="btn btn-gray btn-sm" onclick="descargarPlantillaCSV()">📄 Plantilla</button>
@@ -658,7 +658,14 @@ async function guardarServicio(eid) {
     const tipo = document.getElementById('sTipo').value;
     const fecha = document.getElementById('sFecha').value;
     const prox = tipo === 'Mantenimiento' ? (document.getElementById('proxFecha')?.value || null) : null;
+    const estadoRep = tipo === 'Reparacion' ? document.getElementById('estadoReparacion')?.value : null;
     
+// 👇 VALIDACIÓN OBLIGATORIA (opcional)
+    if (tipo === 'Reparacion' && (!estadoRep || estadoRep === '')) {
+        toast('⚠️ Debes seleccionar el estado posterior a la reparación');
+        return;
+    }
+
     const fotosBase64 = [];
     for (let i = 0; i < fotosNuevas.length; i++) {
         if (fotosNuevas[i]) {
@@ -675,7 +682,8 @@ async function guardarServicio(eid) {
             tecnico: sesionActual?.nombre || '',
             descripcion: desc,
             proximoMantenimiento: prox,
-            fotos: fotosBase64
+            fotos: fotosBase64,
+            estadoReparacion: estadoRep
         });
         closeModal();
         await cargarDatos();
@@ -689,8 +697,10 @@ async function guardarServicio(eid) {
 
 function onTipoChange() {
     const tipo = document.getElementById('sTipo')?.value;
-    const box = document.getElementById('mantBox');
-    if (box) box.classList.toggle('hidden', tipo !== 'Mantenimiento');
+    const mantBox = document.getElementById('mantBox');
+    const reparacionBox = document.getElementById('reparacionBox');
+    if (mantBox) mantBox.classList.toggle('hidden', tipo !== 'Mantenimiento');
+    if (reparacionBox) reparacionBox.classList.toggle('hidden', tipo !== 'Reparacion');
 }
 
 function previewFoto(input, idx) {
@@ -747,6 +757,15 @@ function modalNuevoServicio(eid) {
                 <label class="fl">📅 Proximo mantenimiento</label>
                 <input class="fi" type="date" id="proxFecha">
             </div>
+<div class="reparacion-box hidden" id="reparacionBox">
+    <label class="fl">🔧 Estado posterior a la reparación</label>
+    <select class="fi" id="estadoReparacion">
+        <option value="OPERATIVO">OPERATIVO</option>
+        <option value="FUERA DE SERVICIO">FUERA DE SERVICIO</option>
+        <option value="DAR DE BAJA">DAR DE BAJA</option>
+    </select>
+</div>
+
             <label class="fl">📷 Fotos (max 3)</label>
             <div class="foto-row">
                 ${[0,1,2].map(i => `<div style="flex:1;"><div class="fslot" id="fslot${i}" onclick="document.getElementById('finput${i}').click()"><div class="fslot-plus">+</div><div class="fslot-lbl">Foto ${i+1}</div><input type="file" id="finput${i}" accept="image/*" style="display:none" onchange="previewFoto(this,${i})"></div></div>`).join('')}
@@ -797,7 +816,7 @@ function modalInformeJMC(eid) {
         <div class="modal-b">
             <div style="background:#0d4a3a;color:white;text-align:center;padding:4px;margin-bottom:6px;border-radius:4px;">CONTRATISTA</div>
             <div class="fr"><div><label class="fl">Razon social</label><input class="fi" value="D1 coordinador Mtto CEDI" readonly></div><div><label class="fl">NIT</label><input class="fi" value="901.050.468-5" readonly></div></div>
-            <div class="fr"><div><label class="fl">Contacto</label><input class="fi" value="Osca" readonly></div><div><label class="fl">Telefono</label><input class="fi" value="311 4831801" readonly></div></div>
+            <div class="fr"><div><label class="fl">Contacto</label><input class="fi" value="Osca" readonly></div><div><label class="fl">Telefono</label><input class="fi" value="3239454477" readonly></div></div>
             <div style="background:#0d4a3a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">SOLICITANTE Y TIENDA</div>
             <div class="fr"><div><label class="fl">Nombre solicitante</label><input class="fi" id="jNombreSol" value="${tienda?.coordinador||''}" readonly></div><div><label class="fl">Cargo</label><input class="fi" id="jCargo" value="${tienda?.cargo||''}" readonly></div></div>
             <div class="fr"><div><label class="fl">Nombre tienda</label><input class="fi" id="jTienda" value="${tienda?.tienda||''}" readonly></div><div><label class="fl">N° Tienda (SAP)</label><input class="fi" id="jSAP" value="${sapActual||''}" readonly></div></div>
@@ -1191,7 +1210,7 @@ async function exportarInformeJMC(eid) {
 
 // ===== CRUD CLIENTES =====
 function modalNuevoCliente() {
-    showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo cliente</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre *</label><input class="fi" id="cNombre"><label class="fl">Telefono *</label><input class="fi" id="cTel" type="tel"><label class="fl">Email</label><input class="fi" id="cEmail"><label class="fl">Ciudad *</label><select class="fi" id="cCiudad">${CIUDADES.map(ci=>`<option>${ci}</option>`).join('')}</select><label class="fl">Direccion *</label><input class="fi" id="cDir"><button class="btn btn-blue btn-full" onclick="obtenerGPS()">📍 Compartir ubicacion</button><input type="hidden" id="cLat"><input type="hidden" id="cLng"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarCliente()">Guardar</button></div></div></div>`);
+    showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo CEDI</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre *</label><input class="fi" id="cNombre"><label class="fl">Telefono *</label><input class="fi" id="cTel" type="tel"><label class="fl">Email</label><input class="fi" id="cEmail"><label class="fl">Ciudad *</label><select class="fi" id="cCiudad">${CIUDADES.map(ci=>`<option>${ci}</option>`).join('')}</select><label class="fl">Direccion *</label><input class="fi" id="cDir"><button class="btn btn-blue btn-full" onclick="obtenerGPS()">📍 Compartir ubicacion</button><input type="hidden" id="cLat"><input type="hidden" id="cLng"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarCliente()">Guardar</button></div></div></div>`);
 }
 
 function obtenerGPS() {
@@ -1542,7 +1561,7 @@ function manejarRutaQR() {
     if (botnav) botnav.style.display = 'none';
     main.style.background = 'white';
     const waMsg = encodeURIComponent('Hola necesito ayuda con el ' + (e?.tipo||'') + ' ' + (e?.marca||'') + ' ' + (e?.modelo||'') + ' de la ubicacion ' + (e?.ubicacion||'') + ', podrías devolverme el mensaje');
-    const waUrl = 'https://wa.me/573114831801?text=' + waMsg;
+    const waUrl = 'https://wa.me/573239454477?text=' + waMsg;
     main.innerHTML = `<div style="max-width:600px;margin:0 auto;padding:1.5rem;">
         <div style="text-align:center;margin-bottom:0.75rem;">
             <img src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" style="height:56px;" onerror="this.style.display='none'">
