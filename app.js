@@ -170,7 +170,7 @@ function renderPanel() {
     if(defaultIdx === -1) defaultIdx = 0; // primer CEDI si no hay Ibagué
 
     const html = `<div class="page" id="panelContainer">
-        <div class="selector-panel"><select id="panelSelector" class="fi">
+        <div class="selector-panel"><select id="panelSelector" style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border);border-radius:10px;font-size:0.88rem;font-weight:500;background:white;color:var(--text);">
             ${opciones.map((opt, i) => {
                 const selected = i === defaultIdx ? 'selected' : '';
                 return `<option value="${opt.tipo}|${opt.id}" ${selected}>${opt.tipo === 'cliente' ? 'CEDI: ' : 'TIENDA: '}${opt.nombre}</option>`;
@@ -525,9 +525,45 @@ function renderHistorial() {
     // Volver al detalle correcto según tipo de entidad
     const backTarget = ent?.tipoEntidad === 'tienda' ? `goTo('detalleTienda','${e.clienteId}')` : `goTo('detalleCliente','${e.clienteId}')`;
     return `<div class="page"><div class="det-hdr"><button class="back" onclick="${backTarget}">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion||''} · ${nombreEnt}</div></div></div>
-        <div style="margin-bottom:0.65rem;"><span style="font-weight:700;">Historial (${ss.length})</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;">
+            <span style="font-weight:700;">Historial (${ss.length})</span>
+            <button class="btn btn-gray btn-sm" onclick="exportarHistorialExcel('${e.id}')">📊 Excel</button>
+        </div>
         ${ss.map(s=>`<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span style="font-size:0.82rem;color:var(--hint);">${fmtFecha(s.fecha)}</span></div><div class="si-info">🔧 ${s.tecnico}</div>${s.estadoReparacion?`<div class="si-info"><strong>Estado:</strong> ${s.estadoReparacion}</div>`:''}<div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}<div class="fotos-strip">${(s.fotos||[]).map(f=>`<img class="fthumb" src="${f}" loading="lazy">`).join('')}</div><div class="si-top" style="justify-content:flex-end;margin-top:4px;">${puedeEditar(s.tecnico)?`<button class="ib" onclick="modalEditarServicio('${s.id}')">✏️</button>`:''}${esAdmin()?`<button class="ib" onclick="eliminarServicio('${s.id}')">🗑️</button>`:''}</div></div>`).join('')}
     </div>`;
+}
+
+// NUEVO: exportar historial completo del equipo a Excel (.csv descargable como xlsx)
+function exportarHistorialExcel(eid) {
+    const e = getEq(eid); if(!e) return;
+    const ent = getEntidad(e.clienteId);
+    const ss = getServiciosEquipo(eid).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+    if(!ss.length){ toast('⚠️ Sin servicios para exportar'); return; }
+    const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
+    const header = ['Fecha','Tipo','Tecnico','Estado','Descripcion','Proximo Mantenimiento','CEDI/Tienda','Activo','Marca','Modelo','Serie','Ubicacion'];
+    const rows = ss.map(s => [
+        fmtFecha(s.fecha),
+        s.tipo||'',
+        s.tecnico||'',
+        s.estadoReparacion||'',
+        s.descripcion||'',
+        s.proximoMantenimiento ? fmtFecha(s.proximoMantenimiento) : '',
+        ent?.nombre||'',
+        `${e.marca} ${e.tipo||''} ${e.modelo}`.trim(),
+        e.marca||'',
+        e.modelo||'',
+        e.serie||'',
+        e.ubicacion||''
+    ].map(esc).join(','));
+    const csv = '\uFEFF' + [header.map(esc).join(','), ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Historial_${e.marca}_${e.modelo}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('📊 Excel descargado');
 }
 
 // FIX: compresión de imagen antes de convertir a base64 (max 800px, calidad 0.7)
@@ -697,10 +733,71 @@ function generarInformePDF(eid) {
 
 function modalQR(eid) {
     const e=getEq(eid); const ent=getEntidad(e.clienteId); const url=`${window.location.origin}${window.location.pathname}#/equipo/${eid}`;
-    const qrDiv=document.createElement('div'); qrDiv.style.cssText='position:fixed;top:-9999px;left:-9999px;width:280px;height:280px;'; document.body.appendChild(qrDiv);
+    const qrDiv=document.createElement('div'); qrDiv.style.cssText='position:fixed;top:-9999px;left:-9999px;width:300px;height:300px;'; document.body.appendChild(qrDiv);
     const QRLib=window.QRCode; if(!QRLib){ toast('⚠️ QRCode.js no cargado'); return; }
-    new QRLib(qrDiv,{ text:url, width:280, height:280, colorDark:'#d10000', colorLight:'#ffffff' });
-    setTimeout(()=>{ const qrCanvas=qrDiv.querySelector('canvas'); const qrDataUrl=qrCanvas.toDataURL('image/png'); document.body.removeChild(qrDiv); const W=400,PAD=16; const compCanvas=document.createElement('canvas'); const ctx=compCanvas.getContext('2d'); const logoImg=new Image(); const qrImg=new Image(); logoImg.crossOrigin='anonymous'; logoImg.src='https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png'; logoImg.onload=()=>{ qrImg.onload=()=>{ const logoH=50,infoH=70,qrH=280,footH=24,totalH=PAD+logoH+8+infoH+8+qrH+8+footH+PAD; compCanvas.width=W; compCanvas.height=totalH; ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,totalH); ctx.strokeStyle='#d10000'; ctx.lineWidth=3; ctx.strokeRect(2,2,W-4,totalH-4); ctx.fillStyle='#d10000'; ctx.fillRect(2,2,W-4,logoH+PAD+4); const logoW=logoImg.width*(logoH/logoImg.height); ctx.drawImage(logoImg,(W-logoW)/2,PAD,logoW,logoH); let y=PAD+logoH+8+4; ctx.fillStyle='#111'; ctx.font='bold 14px Arial'; ctx.textAlign='center'; const eqLabel=(e?.marca||'')+' '+(e?.tipo||'')+' '+(e?.modelo||''); ctx.fillText(eqLabel,W/2,y+16); ctx.font='12px Arial'; ctx.fillStyle='#444'; ctx.fillText('📍 '+(e?.ubicacion||'Sin ubicación'),W/2,y+34); ctx.fillText('👤 '+(ent?.nombre||''),W/2,y+50); if(e?.serie){ ctx.font='10px Arial'; ctx.fillStyle='#888'; ctx.fillText('Serie: '+e.serie,W/2,y+64); } y=PAD+logoH+8+4+infoH+8; ctx.drawImage(qrImg,(W-280)/2,y,280,280); y+=280+8; ctx.font='10px Arial'; ctx.fillStyle='#888'; ctx.fillText('Escanea para ver historial y contactar soporte',W/2,y+14); const compositeUrl=compCanvas.toDataURL('image/png'); showModal(`<div class="modal" style="max-width:360px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${compositeUrl}" style="width:100%;border-radius:8px;border:2px solid #d10000;"><a href="${compositeUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`); }; qrImg.src=qrDataUrl; }; logoImg.onerror=()=>{ showModal(`<div class="modal" style="max-width:340px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${qrDataUrl}" style="width:100%;"><a href="${qrDataUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`); }; },200);
+    new QRLib(qrDiv,{ text:url, width:300, height:300, colorDark:'#d10000', colorLight:'#ffffff' });
+    setTimeout(()=>{
+        const qrCanvas=qrDiv.querySelector('canvas');
+        const qrDataUrl=qrCanvas.toDataURL('image/png');
+        document.body.removeChild(qrDiv);
+        // Canvas final: header rojo con logo+nombre, QR centrado, footer
+        const W=420, PAD=16;
+        const HDR=72; // altura header
+        const QRS=300;
+        const FOOT=28;
+        const totalH=HDR+QRS+PAD+FOOT+PAD;
+        const compCanvas=document.createElement('canvas');
+        compCanvas.width=W; compCanvas.height=totalH;
+        const ctx=compCanvas.getContext('2d');
+        // Fondo blanco
+        ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,totalH);
+        // Borde rojo
+        ctx.strokeStyle='#d10000'; ctx.lineWidth=3; ctx.strokeRect(2,2,W-4,totalH-4);
+        // Header rojo
+        ctx.fillStyle='#d10000'; ctx.fillRect(2,2,W-4,HDR);
+        const eqLabel=`${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}`.trim();
+        const entLabel=ent?.nombre||'';
+        const logoImg=new Image(); const qrImg=new Image();
+        logoImg.crossOrigin='anonymous';
+        logoImg.src='https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png';
+        logoImg.onload=()=>{
+            // Logo pequeño izquierda del header
+            const lH=42; const lW=logoImg.width*(lH/logoImg.height);
+            ctx.drawImage(logoImg, PAD, (HDR-lH)/2, lW, lH);
+            // Texto derecha del logo
+            ctx.fillStyle='#ffffff'; ctx.textAlign='left';
+            ctx.font='bold 13px Arial';
+            ctx.fillText(eqLabel, PAD+lW+10, HDR/2-4);
+            ctx.font='11px Arial';
+            ctx.fillStyle='rgba(255,255,255,0.85)';
+            ctx.fillText('🏭 '+entLabel, PAD+lW+10, HDR/2+13);
+            // QR centrado
+            qrImg.onload=()=>{
+                ctx.drawImage(qrImg,(W-QRS)/2, HDR, QRS, QRS);
+                // Footer
+                ctx.fillStyle='#888'; ctx.font='10px Arial'; ctx.textAlign='center';
+                ctx.fillText('Escanea para ver historial y contactar soporte', W/2, HDR+QRS+PAD+14);
+                const compositeUrl=compCanvas.toDataURL('image/png');
+                showModal(`<div class="modal" style="max-width:360px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${compositeUrl}" style="width:100%;border-radius:8px;border:2px solid #d10000;"><a href="${compositeUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`);
+            };
+            qrImg.src=qrDataUrl;
+        };
+        logoImg.onerror=()=>{
+            // Sin logo: solo texto en header
+            ctx.fillStyle='#ffffff'; ctx.textAlign='center'; ctx.font='bold 14px Arial';
+            ctx.fillText(eqLabel, W/2, HDR/2-4);
+            ctx.font='11px Arial'; ctx.fillStyle='rgba(255,255,255,0.85)';
+            ctx.fillText(entLabel, W/2, HDR/2+13);
+            qrImg.onload=()=>{
+                ctx.drawImage(qrImg,(W-QRS)/2, HDR, QRS, QRS);
+                ctx.fillStyle='#888'; ctx.font='10px Arial'; ctx.textAlign='center';
+                ctx.fillText('Escanea para ver historial y contactar soporte', W/2, HDR+QRS+PAD+14);
+                const compositeUrl=compCanvas.toDataURL('image/png');
+                showModal(`<div class="modal" style="max-width:360px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${compositeUrl}" style="width:100%;border-radius:8px;border:2px solid #d10000;"><a href="${compositeUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`);
+            };
+            qrImg.src=qrDataUrl;
+        };
+    },200);
 }
 
 function manejarRutaQR() { const hash=window.location.hash; if(!hash.startsWith('#/equipo/')) return false; const eid=hash.replace('#/equipo/',''); const e=getEq(eid); if(!e) return false; const ent=getEntidad(e.clienteId); const ss=getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); const main=document.getElementById('mainContent'); const topbar=document.querySelector('.topbar'); const botnav=document.querySelector('.botnav'); if(topbar) topbar.style.display='none'; if(botnav) botnav.style.display='none'; main.style.background='white'; const coordinador=ent?.coordinador||'Coordinador'; const telefono=ent?.telefono||'3239454477'; const waMsg=encodeURIComponent(`Hola ${coordinador}, necesito ayuda con el equipo ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} de la ubicación ${e?.ubicacion||'sin ubicación'}, podrías devolverme el mensaje`); const waUrl=`https://wa.me/57${telefono.replace(/\D/g,'')}?text=${waMsg}`; main.innerHTML=`<div style="max-width:600px;margin:0 auto;padding:1.5rem;"><div style="text-align:center;margin-bottom:0.75rem;"><img src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" style="height:56px;" onerror="this.style.display='none'"></div><div style="border:1px solid #ccc;border-radius:12px;padding:1rem;margin-bottom:0.75rem;"><h3 style="margin:0 0 6px;">${e.marca} ${e.tipo||''} ${e.modelo}</h3><p style="margin:2px 0;">📍 ${e.ubicacion||'Sin ubicación'}</p><p style="margin:2px 0;">👤 ${ent?.nombre||'Sin entidad'}</p><p style="margin:2px 0;font-size:0.8rem;color:#888;">Serie: ${e.serie||'N/A'}</p></div><a id="waBtn" href="${waUrl}" target="_blank" style="display:block;width:100%;box-sizing:border-box;background:#25D366;color:white;border:none;padding:14px;border-radius:12px;text-align:center;font-size:1rem;font-weight:700;text-decoration:none;margin-bottom:1rem;">📱 Contactar por WhatsApp</a><h3>Historial (${ss.length})</h3>${ss.map(s=>`<div style="border:1px solid #d1ede0;border-radius:10px;padding:0.85rem;margin-bottom:0.65rem;"><div style="display:flex;justify-content:space-between;"><strong>${s.tipo}</strong><span style="font-size:0.8rem;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:0.85rem;">🔧 ${s.tecnico}</div><div style="font-size:0.85rem;margin-top:2px;">${s.descripcion}</div>${s.estadoReparacion?`<div style="font-size:0.82rem;color:#d10000;font-weight:700;margin-top:2px;">Estado: ${s.estadoReparacion}</div>`:''} ${s.proximoMantenimiento?`<div style="font-size:0.82rem;color:#b45309;margin-top:4px;">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`).join('')}</div>`; return true; }
@@ -715,7 +812,7 @@ function enviarWhatsApp(tel) { const msg=document.getElementById('waMsgEdit')?.v
 
 function renderTecnicos() {
     return `<div class="page"><div class="sec-head"><h2>Tecnicos (${tecnicos.length})</h2>${esAdmin()?`<button class="btn btn-blue btn-sm" onclick="modalNuevoTecnico()">+ Nuevo</button>`:''}</div>
-        ${tecnicos.map(t=>{ const esps=(t.especialidades||[]).map(id=>ESPECIALIDADES.find(e=>e.id===id)?.label||id); return `<div class="ec"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${t.nombre}</div><div class="ec-meta">${t.tipoDoc} ${t.cedula}</div><div class="ec-meta">${t.cargo}</div><div class="ec-meta">📞 ${t.telefono}</div></div><div><span class="tc-rol-badge ${t.rol==='admin'?'rol-admin':'rol-tec'}">${t.rol==='admin'?'Admin':'Tecnico'}</span>${esAdmin()?`<div><button class="ib" onclick="modalEditarTecnico('${t.id}')">✏️</button><button class="ib" onclick="eliminarTecnico('${t.id}')">🗑️</button></div>`:''}</div></div><div>${esps.map(e=>`<span class="esp-chip">${e}</span>`).join('')}</div><div class="ec-meta">📍 ${t.region||'Sin region'}</div><button class="btn btn-blue btn-sm btn-full" onclick="abrirLogin('${t.id}')">🔑 Ingresar como ${t.nombre.split(' ')[0]}</button></div>`; }).join('')}
+        ${tecnicos.map(t=>{ const esps=(t.especialidades||[]).map(id=>ESPECIALIDADES.find(e=>e.id===id)?.label||id); return `<div class="ec"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${t.nombre}</div>${sesionActual?`<div class="ec-meta">${t.tipoDoc} ${t.cedula}</div>`:''}<div class="ec-meta">${t.cargo}</div><div class="ec-meta">📞 ${t.telefono}</div></div><div><span class="tc-rol-badge ${t.rol==='admin'?'rol-admin':'rol-tec'}">${t.rol==='admin'?'Admin':'Tecnico'}</span>${esAdmin()?`<div><button class="ib" onclick="modalEditarTecnico('${t.id}')">✏️</button><button class="ib" onclick="eliminarTecnico('${t.id}')">🗑️</button></div>`:''}</div></div>${sesionActual?`<div>${esps.map(e=>`<span class="esp-chip">${e}</span>`).join('')}</div>`:''}<div class="ec-meta">📍 ${t.region||'Sin region'}</div><button class="btn btn-blue btn-sm btn-full" onclick="abrirLogin('${t.id}')">🔑 Ingresar como ${t.nombre.split(' ')[0]}</button></div>`; }).join('')}
         ${esAdmin()?`<div style="margin-top:1.2rem;background:white;border-radius:12px;padding:0.85rem;"><div style="font-weight:700;">🏪 Subida Masiva de CEDIs y Tiendas</div><div class="ec-meta">Sube un CSV con columnas: SAP, TIENDA, CIUDAD, DEPARTAMENTO, DIRECCION, COORDINADOR, CARGO, TELEFONO</div><label class="btn btn-blue btn-sm" style="display:inline-block;margin:4px;">📥 Subir CSV<input type="file" accept=".csv" style="display:none;" onchange="subirCSVJMC(this)"></label><button class="btn btn-gray btn-sm" onclick="descargarPlantillaCSV()">📄 Plantilla</button></div>`:''}
     </div>`;
 }
@@ -832,7 +929,7 @@ async function subirCSVJMC(input) {
 function descargarPlantillaCSV() { const enc='SAP,TIENDA,CIUDAD,DEPARTAMENTO,DIRECCION,COORDINADOR,CARGO,TELEFONO'; const ejemplo='170,Chia - Centro - Calle 13,Chia,Cundinamarca,Calle 13 # 9-43,Edgar Amado,Coordinador Sr Mantenimiento,3107935104'; const csv=[enc,ejemplo].join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='plantilla_cedis_tiendas.csv'; a.click(); URL.revokeObjectURL(url); toast('📄 Plantilla descargada'); }
 function puedeEditar(creadoPor) { return esAdmin() || sesionActual?.nombre === creadoPor; }
 
-window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarTiendas=filtrarTiendas; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevaTienda=modalNuevaTienda; window.modalEditarTienda=modalEditarTienda; window.modalEliminarTienda=modalEliminarTienda; window.actualizarTienda=actualizarTienda; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR; window.obtenerGPS=obtenerGPS; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.onEditTipoChange=onEditTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.subirCSVJMC=subirCSVJMC; window.descargarPlantillaCSV=descargarPlantillaCSV; window.guardarCliente=guardarCliente; window.guardarTienda=guardarTienda; window.guardarTecnico=guardarTecnico; window.actualizarTecnico=actualizarTecnico; window.eliminarTecnico=eliminarTecnico; window.actualizarServicio=actualizarServicio; window.guardarServicio=guardarServicio; window.actualizarEquipo=actualizarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.eliminarEquipo=eliminarEquipo; window.modalEliminarCliente=modalEliminarCliente; window.modalEliminarTienda=modalEliminarTienda;
+window.exportarHistorialExcel=exportarHistorialExcel; window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarTiendas=filtrarTiendas; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevaTienda=modalNuevaTienda; window.modalEditarTienda=modalEditarTienda; window.modalEliminarTienda=modalEliminarTienda; window.actualizarTienda=actualizarTienda; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR; window.obtenerGPS=obtenerGPS; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.onEditTipoChange=onEditTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.subirCSVJMC=subirCSVJMC; window.descargarPlantillaCSV=descargarPlantillaCSV; window.guardarCliente=guardarCliente; window.guardarTienda=guardarTienda; window.guardarTecnico=guardarTecnico; window.actualizarTecnico=actualizarTecnico; window.eliminarTecnico=eliminarTecnico; window.actualizarServicio=actualizarServicio; window.guardarServicio=guardarServicio; window.actualizarEquipo=actualizarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.eliminarEquipo=eliminarEquipo; window.modalEliminarCliente=modalEliminarCliente; window.modalEliminarTienda=modalEliminarTienda;
 
 document.querySelectorAll('.bni').forEach(btn=>{ btn.addEventListener('click',()=>{ const page=btn.dataset.page; if(!sesionActual && page!=='panel' && page!=='tecnicos'){ toast('🔒 Inicia sesion desde Tecnicos'); return; } goTo(page); }); });
 
