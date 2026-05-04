@@ -260,10 +260,59 @@ async function actualizarPanel(entidadId, entidadTipo) {
         }
     }
     fueraHtml += '</div></div>';
+
+    const ent = getEntidad(entidadId);
+    const exportBtn = `<div style="display:flex;justify-content:flex-end;margin-bottom:0.5rem;">
+        <button class="btn btn-gray btn-sm" onclick="exportarHistorialEntidad('${entidadId}')">📊 Exportar Excel</button>
+    </div>`;
+
     const statsDiv = document.getElementById('panelStats');
     const fueraDiv = document.getElementById('panelEquiposFuera');
-    if(statsDiv) statsDiv.innerHTML = statsHtml;
+    if(statsDiv) statsDiv.innerHTML = exportBtn + statsHtml;
     if(fueraDiv) fueraDiv.innerHTML = fueraHtml;
+}
+
+// Exporta TODO el historial de todos los equipos del CEDI o Tienda seleccionado
+function exportarHistorialEntidad(entidadId) {
+    const ent = getEntidad(entidadId);
+    const equiposEntidad = equipos.filter(e => e.clienteId === entidadId);
+    if(!equiposEntidad.length) { toast('⚠️ No hay activos registrados'); return; }
+
+    const filas = [];
+    for(const eq of equiposEntidad) {
+        const ss = getServiciosEquipo(eq.id).sort((a,b) => new Date(a.fecha) - new Date(b.fecha));
+        for(const s of ss) {
+            filas.push([
+                fmtFecha(s.fecha),
+                s.tipo || '',
+                s.tecnico || '',
+                s.estadoReparacion || '',
+                s.descripcion || '',
+                s.proximoMantenimiento ? fmtFecha(s.proximoMantenimiento) : '',
+                ent?.nombre || '',
+                `${eq.marca} ${eq.tipo||''} ${eq.modelo}`.trim(),
+                eq.marca || '',
+                eq.modelo || '',
+                eq.serie || '',
+                eq.ubicacion || ''
+            ]);
+        }
+    }
+
+    if(!filas.length) { toast('⚠️ Sin servicios para exportar'); return; }
+
+    const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
+    const header = ['Fecha','Tipo','Tecnico','Estado','Descripcion','Proximo Mantenimiento','CEDI/Tienda','Activo','Marca','Modelo','Serie','Ubicacion'];
+    const csv = '\uFEFF' + [header.map(esc).join(','), ...filas.map(f => f.map(esc).join(','))].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const nombre = ent?.nombre || entidadId;
+    a.download = `Historial_${nombre.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`📊 Excel descargado — ${filas.length} servicios`);
 }
 
 function renderClientes() {
@@ -929,7 +978,7 @@ async function subirCSVJMC(input) {
 function descargarPlantillaCSV() { const enc='SAP,TIENDA,CIUDAD,DEPARTAMENTO,DIRECCION,COORDINADOR,CARGO,TELEFONO'; const ejemplo='170,Chia - Centro - Calle 13,Chia,Cundinamarca,Calle 13 # 9-43,Edgar Amado,Coordinador Sr Mantenimiento,3107935104'; const csv=[enc,ejemplo].join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='plantilla_cedis_tiendas.csv'; a.click(); URL.revokeObjectURL(url); toast('📄 Plantilla descargada'); }
 function puedeEditar(creadoPor) { return esAdmin() || sesionActual?.nombre === creadoPor; }
 
-window.exportarHistorialExcel=exportarHistorialExcel; window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarTiendas=filtrarTiendas; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevaTienda=modalNuevaTienda; window.modalEditarTienda=modalEditarTienda; window.modalEliminarTienda=modalEliminarTienda; window.actualizarTienda=actualizarTienda; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR; window.obtenerGPS=obtenerGPS; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.onEditTipoChange=onEditTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.subirCSVJMC=subirCSVJMC; window.descargarPlantillaCSV=descargarPlantillaCSV; window.guardarCliente=guardarCliente; window.guardarTienda=guardarTienda; window.guardarTecnico=guardarTecnico; window.actualizarTecnico=actualizarTecnico; window.eliminarTecnico=eliminarTecnico; window.actualizarServicio=actualizarServicio; window.guardarServicio=guardarServicio; window.actualizarEquipo=actualizarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.eliminarEquipo=eliminarEquipo; window.modalEliminarCliente=modalEliminarCliente; window.modalEliminarTienda=modalEliminarTienda;
+window.exportarHistorialEntidad=exportarHistorialEntidad; window.exportarHistorialExcel=exportarHistorialExcel; window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarTiendas=filtrarTiendas; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevaTienda=modalNuevaTienda; window.modalEditarTienda=modalEditarTienda; window.modalEliminarTienda=modalEliminarTienda; window.actualizarTienda=actualizarTienda; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR; window.obtenerGPS=obtenerGPS; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.onEditTipoChange=onEditTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.subirCSVJMC=subirCSVJMC; window.descargarPlantillaCSV=descargarPlantillaCSV; window.guardarCliente=guardarCliente; window.guardarTienda=guardarTienda; window.guardarTecnico=guardarTecnico; window.actualizarTecnico=actualizarTecnico; window.eliminarTecnico=eliminarTecnico; window.actualizarServicio=actualizarServicio; window.guardarServicio=guardarServicio; window.actualizarEquipo=actualizarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.eliminarEquipo=eliminarEquipo; window.modalEliminarCliente=modalEliminarCliente; window.modalEliminarTienda=modalEliminarTienda;
 
 document.querySelectorAll('.bni').forEach(btn=>{ btn.addEventListener('click',()=>{ const page=btn.dataset.page; if(!sesionActual && page!=='panel' && page!=='tecnicos'){ toast('🔒 Inicia sesion desde Tecnicos'); return; } goTo(page); }); });
 
