@@ -123,7 +123,7 @@ html, body {
 .bni-lbl { font-size: 0.58rem; color: var(--hint); }
 .bni.active .bni-lbl { color: var(--red); font-weight: 700; }
 
-/* ===== PANEL ===== */
+/* ===== PANEL NUEVO ===== */
 .selector-panel {
     background: white;
     border-radius: 12px;
@@ -310,7 +310,7 @@ html, body {
     margin-top: 10px;
 }
 
-/* ===== RESTO DE COMPONENTES ===== */
+/* ===== RESTO DE COMPONENTES (original, solo colores ajustados) ===== */
 .sec-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.7rem; }
 .sec-head h2 { font-size: 1rem; font-weight: 700; color: var(--text); }
 .search {

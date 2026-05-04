@@ -23,10 +23,8 @@ async function conectarDriveAuto() {
 }
 async function driveUploadPDF(html, filename) {
     if (!filename.endsWith('.pdf')) filename = filename.replace('.html', '') + '.pdf';
-    try {
-        await fetch(APPS_SCRIPT_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html, filename }) });
-        return true;
-    } catch(e) { return false; }
+    try { await fetch(APPS_SCRIPT_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html, filename }) }); return true; } 
+    catch(e) { return false; }
 }
 
 let clientes = [], tiendas = [], equipos = [], servicios = [], tecnicos = [];
@@ -34,6 +32,7 @@ let jmcTiendas = [], jmcTiendasVersion = '';
 
 async function cargarDatos() {
     const main = document.getElementById('mainContent');
+    if (!main) return;
     main.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><p>Cargando...</p></div>';
     try {
         const [cs, ts, es, ss, tecs, jmc] = await Promise.all([
@@ -70,15 +69,19 @@ const getEquiposTienda = tid => equipos.filter(e => e.clienteId === tid);
 const getServiciosEquipo = eid => servicios.filter(s => s.equipoId === eid);
 const getServiciosCliente = cid => servicios.filter(s => getEquiposCliente(cid).some(e => e.id === s.equipoId));
 const getServiciosTienda = tid => servicios.filter(s => getEquiposTienda(tid).some(e => e.id === s.equipoId));
+const getTiendaJMC = (sap) => jmcTiendas.find(t => t.sap === String(sap));
+function esClienteJMC(clienteId) {
+    const c = clientes.find(c => c.id === clienteId);
+    return c?.nombre === 'Jeronimo Martins Colombia';
+}
 
 function fmtFecha(f) { if (!f) return ''; return new Date(f + 'T12:00:00').toLocaleDateString('es-ES'); }
 function fmtFechaLarga(f) { if (!f) return ''; return new Date(f + 'T12:00:00').toLocaleDateString('es-ES', { day:'numeric', month:'long', year:'numeric' }); }
-function getMesActual() { return new Date().toISOString().slice(0,7); }
 
 function esAdmin() { return sesionActual?.rol === 'admin'; }
-function toast(msg, duration=3000) { const t = document.getElementById('toastEl'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._timer); t._timer = setTimeout(() => t.classList.remove('show'), duration); }
-function showModal(html) { const ov = document.getElementById('overlayEl'); ov.innerHTML = html; ov.classList.remove('hidden'); ov.onclick = e => { if(e.target === ov) closeModal(); }; }
-function closeModal() { const ov = document.getElementById('overlayEl'); ov.classList.add('hidden'); ov.innerHTML = ''; fotosNuevas = [null,null,null]; }
+function toast(msg, duration=3000) { const t = document.getElementById('toastEl'); if (!t) return; t.textContent = msg; t.classList.add('show'); clearTimeout(t._timer); t._timer = setTimeout(() => t.classList.remove('show'), duration); }
+function showModal(html) { const ov = document.getElementById('overlayEl'); if (!ov) return; ov.innerHTML = html; ov.classList.remove('hidden'); ov.onclick = e => { if(e.target === ov) closeModal(); }; }
+function closeModal() { const ov = document.getElementById('overlayEl'); if (!ov) return; ov.classList.add('hidden'); ov.innerHTML = ''; fotosNuevas = [null,null,null]; }
 
 function actualizarTopbar() {
     const right = document.getElementById('topbarRight');
@@ -116,7 +119,9 @@ function goTo(view, id=null, eid=null) {
 function renderView() {
     if(!sesionActual && currentView !== 'panel' && currentView !== 'tecnicos') currentView = 'panel';
     const main = document.getElementById('mainContent');
-    document.getElementById('botnavEl').style.display = 'flex';
+    if (!main) return;
+    const botnav = document.getElementById('botnavEl');
+    if (botnav) botnav.style.display = 'flex';
     switch(currentView) {
         case 'panel': main.innerHTML = renderPanel(); break;
         case 'clientes': main.innerHTML = renderClientes(); break;
@@ -124,7 +129,7 @@ function renderView() {
         case 'detalleCliente': main.innerHTML = renderDetalleCliente(); break;
         case 'detalleTienda': main.innerHTML = renderDetalleTienda(); break;
         case 'historial': main.innerHTML = renderHistorial(); break;
-        case 'servicios': main.innerHTML = renderServicios(); if(window.aplicarFiltros) aplicarFiltros(); break;
+        case 'servicios': main.innerHTML = renderServicios(); setTimeout(() => { if(window.aplicarFiltros) aplicarFiltros(); }, 100); break;
         case 'mantenimientos': main.innerHTML = renderMantenimientos(); break;
         case 'tecnicos': main.innerHTML = renderTecnicos(); break;
         default: main.innerHTML = renderPanel();
@@ -133,13 +138,16 @@ function renderView() {
 
 function renderPanel() {
     const opciones = [...clientes.map(c => ({ id:c.id, nombre:c.nombre, tipo:'cliente' })), ...tiendas.map(t => ({ id:t.id, nombre:t.nombre, tipo:'tienda' }))];
-    if(opciones.length === 0) return '<div class="page"><div class="panel-banner">No hay CEDIs ni Tiendas registradas.</div></div>';
+    if(opciones.length === 0) {
+        return `<div class="page"><div class="panel-banner">No hay CEDIs ni Tiendas registradas.</div></div>`;
+    }
     return `<div class="page" id="panelContainer">
         <div class="selector-panel"><select id="panelSelector" class="fi">${opciones.map(opt => `<option value="${opt.tipo}|${opt.id}">${opt.tipo === 'cliente' ? 'CEDI: ' : 'TIENDA: '}${opt.nombre}</option>`).join('')}</select></div>
         <div id="panelStats"></div>
         <div id="panelEquiposFuera"></div>
     </div>`;
 }
+
 async function actualizarPanel(entidadId, entidadTipo) {
     const equiposEntidad = equipos.filter(e => e.clienteId === entidadId);
     let operativos=0, fueraServicio=0, darBaja=0, sinInfo=0;
@@ -188,16 +196,25 @@ async function actualizarPanel(entidadId, entidadTipo) {
             <div>Instalación <span class="panel-number">${mensualInst}</span></div>
         </div></div>
     </div>`;
-    const equiposFuera = equiposEntidad.filter(eq => getServiciosEquipo(eq.id).some(s => s.estadoReparacion === 'FUERA DE SERVICIO'));
+    const equiposFuera = equiposEntidad.filter(eq => {
+        const ss = getServiciosEquipo(eq.id);
+        return ss.some(s => s.estadoReparacion === 'FUERA DE SERVICIO');
+    });
     let fueraHtml = '<div class="equipos-fuera"><h4>⚙️ Equipos FUERA DE SERVICIO</h4><div class="scroll-horizontal">';
-    if(!equiposFuera.length) fueraHtml += '<span style="font-size:0.75rem;color:var(--hint);">No hay equipos en este estado.</span>';
-    else for(const eq of equiposFuera) fueraHtml += `<div class="equipo-card" onclick="goTo('historial', null, '${eq.id}')">${eq.marca} ${eq.tipo||''} ${eq.modelo}</div>`;
+    if(equiposFuera.length === 0) {
+        fueraHtml += '<span style="font-size:0.75rem;color:var(--hint);">No hay equipos en este estado.</span>';
+    } else {
+        for(const eq of equiposFuera) {
+            fueraHtml += `<div class="equipo-card" onclick="goTo('historial', null, '${eq.id}')">${eq.marca} ${eq.tipo || ''} ${eq.modelo}</div>`;
+        }
+    }
     fueraHtml += '</div></div>';
     const statsDiv = document.getElementById('panelStats');
     const fueraDiv = document.getElementById('panelEquiposFuera');
     if(statsDiv) statsDiv.innerHTML = statsHtml;
     if(fueraDiv) fueraDiv.innerHTML = fueraHtml;
 }
+
 function initPanel() {
     const selector = document.getElementById('panelSelector');
     if(!selector) return;
@@ -205,6 +222,7 @@ function initPanel() {
     actualizarPanel(id, tipo);
     selector.addEventListener('change', (e) => { const [newTipo, newId] = e.target.value.split('|'); actualizarPanel(newId, newTipo); });
 }
+
 const originalRenderPanel = renderPanel;
 renderPanel = function() { const html = originalRenderPanel(); setTimeout(() => { if(document.getElementById('panelSelector')) initPanel(); }, 100); return html; }.bind(this);
 
@@ -220,7 +238,9 @@ function renderClientes() {
             <button class="link-btn" onclick="goTo('detalleCliente','${c.id}')">Ver activos →</button>
         </div>`).join('')}</div></div>`;
 }
+
 function filtrarClientes(v) { const txt=v.toLowerCase(); document.querySelectorAll('#clientesGrid .cc').forEach(c=>{c.style.display=(c.dataset.search||'').includes(txt)?'':'none';}); }
+
 function renderDetalleCliente() {
     const c = clientes.find(x=>x.id===selectedClienteId); if(!c) { goTo('clientes'); return ''; }
     const eqs = getEquiposCliente(c.id);
@@ -232,6 +252,7 @@ function renderDetalleCliente() {
         <div class="ec-btns"><button class="ab" onclick="goTo('historial','${c.id}','${e.id}')">📋 Servicios</button><button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button><button class="ab" onclick="generarInformePDF('${e.id}')">📄 PDF</button><button class="ab" onclick="modalQR('${e.id}')">📱 QR</button></div></div>`).join('')}
     </div>`;
 }
+
 function modalNuevoCliente() {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo CEDI</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <label class="fl">SAP *</label><input class="fi" id="cSap">
@@ -248,6 +269,7 @@ function modalNuevoCliente() {
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarCliente()">Guardar</button></div>
     </div></div>`);
 }
+
 async function guardarCliente() {
     const sap = document.getElementById('cSap')?.value?.trim();
     const nombre = document.getElementById('cNombre')?.value?.trim();
@@ -266,6 +288,7 @@ async function guardarCliente() {
         closeModal(); await cargarDatos(); toast('✅ CEDI guardado');
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
+
 function modalEditarCliente(cid) {
     const c = clientes.find(x=>x.id===cid); if(!c) return;
     showModal(`<div class="modal"><div class="modal-h"><h3>Editar CEDI</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
@@ -283,6 +306,7 @@ function modalEditarCliente(cid) {
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarCliente('${cid}')">Guardar</button></div>
     </div></div>`);
 }
+
 async function actualizarCliente(cid) {
     const data = {
         sap: document.getElementById('eSap').value,
@@ -299,13 +323,13 @@ async function actualizarCliente(cid) {
     };
     try { await updateDoc(doc(db, 'clientes', cid), data); closeModal(); await cargarDatos(); toast('✅ CEDI actualizado'); } catch(err) { toast('❌ Error: ' + err.message); }
 }
+
 function modalEliminarCliente(cid) { if(!confirm('¿Eliminar este CEDI y todos sus activos/servicios?')) return; eliminarCliente(cid); }
 async function eliminarCliente(cid) {
     const eids = getEquiposCliente(cid).map(e=>e.id);
     try { for(const eid of eids) { for(const s of getServiciosEquipo(eid)) await deleteDoc(doc(db,'servicios',s.id)); await deleteDoc(doc(db,'equipos',eid)); } await deleteDoc(doc(db,'clientes',cid)); await cargarDatos(); goTo('clientes'); toast('🗑️ CEDI eliminado'); } catch(err) { toast('❌ Error: '+err.message); }
 }
 
-// ===== TIENDAS =====
 function renderTiendas() {
     return `<div class="page"><div class="sec-head"><h2>Tiendas (${tiendas.length})</h2><button class="btn btn-blue btn-sm" onclick="modalNuevaTienda()">+ Nueva</button></div>
         <input class="search" placeholder="🔍 Buscar..." oninput="filtrarTiendas(this.value)" id="searchTiendas">
@@ -317,7 +341,9 @@ function renderTiendas() {
             <button class="link-btn" onclick="goTo('detalleTienda','${t.id}')">Ver activos →</button>
         </div>`).join('')}</div></div>`;
 }
+
 function filtrarTiendas(v) { const txt=v.toLowerCase(); document.querySelectorAll('#tiendasGrid .cc').forEach(c=>{c.style.display=(c.dataset.search||'').includes(txt)?'':'none';}); }
+
 function renderDetalleTienda() {
     const t = tiendas.find(x=>x.id===selectedTiendaId); if(!t) { goTo('tiendas'); return ''; }
     const eqs = getEquiposTienda(t.id);
@@ -328,6 +354,7 @@ function renderDetalleTienda() {
         <div class="ec-btns"><button class="ab" onclick="goTo('historial','${t.id}','${e.id}')">📋 Servicios</button><button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button><button class="ab" onclick="generarInformePDF('${e.id}')">📄 PDF</button><button class="ab" onclick="modalQR('${e.id}')">📱 QR</button></div></div>`).join('')}
     </div>`;
 }
+
 function modalNuevaTienda() {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nueva Tienda</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <label class="fl">SAP *</label><input class="fi" id="tSap">
@@ -343,6 +370,7 @@ function modalNuevaTienda() {
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarTienda()">Guardar</button></div>
     </div></div>`);
 }
+
 async function guardarTienda() {
     const sap = document.getElementById('tSap')?.value?.trim();
     const nombre = document.getElementById('tNombre')?.value?.trim();
@@ -360,6 +388,7 @@ async function guardarTienda() {
         closeModal(); await cargarDatos(); toast('✅ Tienda guardada');
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
+
 function modalEditarTienda(tid) {
     const t = tiendas.find(x=>x.id===tid); if(!t) return;
     showModal(`<div class="modal"><div class="modal-h"><h3>Editar Tienda</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
@@ -376,6 +405,7 @@ function modalEditarTienda(tid) {
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarTienda('${tid}')">Guardar</button></div>
     </div></div>`);
 }
+
 async function actualizarTienda(tid) {
     const data = {
         sap: document.getElementById('etSap').value,
@@ -391,6 +421,7 @@ async function actualizarTienda(tid) {
     };
     try { await updateDoc(doc(db, 'tiendas', tid), data); closeModal(); await cargarDatos(); toast('✅ Tienda actualizada'); } catch(err) { toast('❌ Error: ' + err.message); }
 }
+
 function modalEliminarTienda(tid) { if(!confirm('¿Eliminar esta Tienda y todos sus activos/servicios?')) return; eliminarTienda(tid); }
 async function eliminarTienda(tid) {
     const eids = getEquiposTienda(tid).map(e=>e.id);
@@ -400,10 +431,12 @@ async function eliminarTienda(tid) {
 function modalNuevoEquipo(entidadId) {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo activo</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <div class="fr"><div><label class="fl">Marca *</label><input class="fi" id="qMarca"></div><div><label class="fl">Modelo *</label><input class="fi" id="qModelo"></div></div>
-        <label class="fl">Serie</label><input class="fi" id="qSerie"><label class="fl">Tipo</label><input class="fi" id="qTipo">
+        <label class="fl">Serie</label><input class="fi" id="qSerie">
+        <label class="fl">Tipo</label><input class="fi" id="qTipo">
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarEquipo('${entidadId}')">Guardar</button></div>
     </div></div>`);
 }
+
 async function guardarEquipo(entidadId) {
     const marca = document.getElementById('qMarca')?.value?.trim();
     const modelo = document.getElementById('qModelo')?.value?.trim();
@@ -415,14 +448,17 @@ async function guardarEquipo(entidadId) {
         closeModal(); await cargarDatos(); toast('✅ Activo guardado');
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
+
 function modalEditarEquipo(eid) {
     const eq = getEq(eid); if(!eq) return;
     showModal(`<div class="modal"><div class="modal-h"><h3>Editar activo</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <div class="fr"><div><label class="fl">Marca</label><input class="fi" id="eMarca" value="${eq.marca}"></div><div><label class="fl">Modelo</label><input class="fi" id="eModelo" value="${eq.modelo}"></div></div>
-        <label class="fl">Serie</label><input class="fi" id="eSerie" value="${eq.serie||''}"><label class="fl">Tipo</label><input class="fi" id="eTipoEq" value="${eq.tipo||''}">
+        <label class="fl">Serie</label><input class="fi" id="eSerie" value="${eq.serie||''}">
+        <label class="fl">Tipo</label><input class="fi" id="eTipoEq" value="${eq.tipo||''}">
         <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarEquipo('${eid}')">Guardar</button></div>
     </div></div>`);
 }
+
 async function actualizarEquipo(eid) {
     try {
         await updateDoc(doc(db,'equipos',eid), {
@@ -434,10 +470,21 @@ async function actualizarEquipo(eid) {
         closeModal(); await cargarDatos(); toast('✅ Activo actualizado');
     } catch(err) { toast('❌ Error: '+err.message); }
 }
+
 function modalEliminarEquipo(eid) { if(!confirm('¿Eliminar este activo y sus servicios?')) return; eliminarEquipo(eid); }
 async function eliminarEquipo(eid) {
     const ss = getServiciosEquipo(eid);
     try { for(const s of ss) await deleteDoc(doc(db,'servicios',s.id)); await deleteDoc(doc(db,'equipos',eid)); await cargarDatos(); toast('🗑️ Activo eliminado'); } catch(err) { toast('❌ Error: '+err.message); }
+}
+
+function renderHistorial() {
+    const e = getEq(selectedEquipoId); if(!e) { goTo('clientes'); return ''; }
+    const ent = getEntidad(e.clienteId); const nombreEnt = ent ? ent.nombre : 'Sin entidad';
+    const ss = getServiciosEquipo(e.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+    return `<div class="page"><div class="det-hdr"><button class="back" onclick="goTo('detalleCliente','${e.clienteId}')">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion||''} · ${nombreEnt}</div></div></div>
+        <div style="margin-bottom:2rem;"><span style="font-weight:700;">Historial (${ss.length})</span></div>
+        ${ss.map(s=>`<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span style="font-size:2rem;color:var(--hint);">${fmtFecha(s.fecha)}</span></div><div class="si-info">🔧 ${s.tecnico}</div><div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}<div class="fotos-strip">${(s.fotos||[]).map(f=>`<img class="fthumb" src="${f}" loading="lazy">`).join('')}</div><div class="si-top" style="justify-content:flex-end;margin-top:4px;">${puedeEditar(s.tecnico)?`<button class="ib" onclick="modalEditarServicio('${s.id}')">✏️</button>`:''}${esAdmin()?`<button class="ib" onclick="eliminarServicio('${s.id}')">🗑️</button>`:''}</div></div>`).join('')}
+    </div>`;
 }
 
 function fileToBase64(file) { return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onload=()=>resolve(reader.result); reader.onerror=reject; reader.readAsDataURL(file); }); }
@@ -490,6 +537,7 @@ function generarInformePDF(eid) {
     const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Informe_${e?.marca}_${e?.modelo}</title><style>@page{size:letter;margin:15mm;}body{font-family:Arial,sans-serif;font-size:11px;color:#111;}.header{text-align:center;margin-bottom:15px;}.coordinador{font-size:14px;font-weight:bold;color:#d10000;}.titulo{font-size:18px;font-weight:bold;margin-top:5px;}</style></head><body><div class="header"><div class="coordinador">Coordinador: ${coordinador} | Tel: ${telefonoCoord}</div><div class="titulo">INFORME TECNICO</div></div><table style="width:100%;border-collapse:collapse;margin-bottom:12px;"><tr><td style="padding:6px;background:#f1f5f9;border:1px solid #ddd;"><strong>Cliente:</strong> ${ent?.nombre||'N/A'}</td><td style="padding:6px;background:#f1f5f9;border:1px solid #ddd;"><strong>Generado:</strong> ${new Date().toLocaleString()}</td></tr><tr><td colspan="2" style="padding:6px;border:1px solid #ddd;"><strong>Activo:</strong> ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} &nbsp;&nbsp; <strong>Serial:</strong> ${e?.serie||'N/A'}</td></tr></table><div style="background:#d10000;color:white;font-weight:bold;padding:6px;margin-bottom:10px;">HISTORIAL DE SERVICIOS (${ss.length})</div>${serviciosHTML}</body></html>`;
     const v=window.open('','_blank'); if(v){ v.document.open(); v.document.write(html); v.document.close(); setTimeout(()=>v.print(),500); }
 }
+
 function modalQR(eid) {
     const e=getEq(eid); const ent=getEntidad(e.clienteId); const url=`${window.location.origin}${window.location.pathname}#/equipo/${eid}`;
     const qrDiv=document.createElement('div'); qrDiv.style.cssText='position:fixed;top:-9999px;left:-9999px;width:280px;height:280px;'; document.body.appendChild(qrDiv);
@@ -497,14 +545,16 @@ function modalQR(eid) {
     new QRLib(qrDiv,{ text:url, width:280, height:280, colorDark:'#d10000', colorLight:'#ffffff' });
     setTimeout(()=>{ const qrCanvas=qrDiv.querySelector('canvas'); const qrDataUrl=qrCanvas.toDataURL('image/png'); document.body.removeChild(qrDiv); const W=400,PAD=16; const compCanvas=document.createElement('canvas'); const ctx=compCanvas.getContext('2d'); const logoImg=new Image(); const qrImg=new Image(); logoImg.crossOrigin='anonymous'; logoImg.src='https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png'; logoImg.onload=()=>{ qrImg.onload=()=>{ const logoH=50,infoH=70,qrH=280,footH=24,totalH=PAD+logoH+8+infoH+8+qrH+8+footH+PAD; compCanvas.width=W; compCanvas.height=totalH; ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,totalH); ctx.strokeStyle='#d10000'; ctx.lineWidth=3; ctx.strokeRect(2,2,W-4,totalH-4); ctx.fillStyle='#d10000'; ctx.fillRect(2,2,W-4,logoH+PAD+4); const logoW=logoImg.width*(logoH/logoImg.height); ctx.drawImage(logoImg,(W-logoW)/2,PAD,logoW,logoH); let y=PAD+logoH+8+4; ctx.fillStyle='#111'; ctx.font='bold 14px Arial'; ctx.textAlign='center'; const eqLabel=(e?.marca||'')+' '+(e?.tipo||'')+' '+(e?.modelo||''); ctx.fillText(eqLabel,W/2,y+16); ctx.font='12px Arial'; ctx.fillStyle='#444'; ctx.fillText('📍 '+(e?.ubicacion||'Sin ubicación'),W/2,y+34); ctx.fillText('👤 '+(ent?.nombre||''),W/2,y+50); if(e?.serie){ ctx.font='10px Arial'; ctx.fillStyle='#888'; ctx.fillText('Serie: '+e.serie,W/2,y+64); } y=PAD+logoH+8+4+infoH+8; ctx.drawImage(qrImg,(W-280)/2,y,280,280); y+=280+8; ctx.font='10px Arial'; ctx.fillStyle='#888'; ctx.fillText('Escanea para ver historial y contactar soporte',W/2,y+14); const compositeUrl=compCanvas.toDataURL('image/png'); showModal(`<div class="modal" style="max-width:360px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${compositeUrl}" style="width:100%;border-radius:8px;border:2px solid #d10000;"><a href="${compositeUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`); }; qrImg.src=qrDataUrl; }; logoImg.onerror=()=>{ showModal(`<div class="modal" style="max-width:340px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${qrDataUrl}" style="width:100%;"><a href="${qrDataUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`); }; },200);
 }
+
 function manejarRutaQR() { const hash=window.location.hash; if(!hash.startsWith('#/equipo/')) return false; const eid=hash.replace('#/equipo/',''); const e=getEq(eid); if(!e) return false; const ent=getEntidad(e.clienteId); const ss=getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); const main=document.getElementById('mainContent'); const topbar=document.querySelector('.topbar'); const botnav=document.querySelector('.botnav'); if(topbar) topbar.style.display='none'; if(botnav) botnav.style.display='none'; main.style.background='white'; const coordinador=ent?.coordinador||'Coordinador'; const telefono=ent?.telefono||'3239454477'; const waMsg=encodeURIComponent(`Hola ${coordinador}, necesito ayuda con el equipo ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} de la ubicación ${e?.ubicacion||'sin ubicación'}, podrías devolverme el mensaje`); const waUrl=`https://wa.me/57${telefono.replace(/\D/g,'')}?text=${waMsg}`; main.innerHTML=`<div style="max-width:600px;margin:0 auto;padding:1.5rem;"><div style="text-align:center;margin-bottom:0.75rem;"><img src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" style="height:56px;" onerror="this.style.display='none'"></div><div style="border:1px solid #ccc;border-radius:12px;padding:1rem;margin-bottom:0.75rem;"><h3 style="margin:0 0 6px;">${e.marca} ${e.tipo||''} ${e.modelo}</h3><p style="margin:2px 0;">📍 ${e.ubicacion||'Sin ubicación'}</p><p style="margin:2px 0;">👤 ${ent?.nombre||'Sin entidad'}</p><p style="margin:2px 0;font-size:0.8rem;color:#888;">Serie: ${e.serie||'N/A'}</p></div><a id="waBtn" href="${waUrl}" target="_blank" style="display:block;width:100%;box-sizing:border-box;background:#25D366;color:white;border:none;padding:14px;border-radius:12px;text-align:center;font-size:1rem;font-weight:700;text-decoration:none;margin-bottom:1rem;">📱 Contactar por WhatsApp</a><h3>Historial (${ss.length})</h3>${ss.map(s=>`<div style="border:1px solid #d1ede0;border-radius:10px;padding:0.85rem;margin-bottom:0.65rem;"><div style="display:flex;justify-content:space-between;"><strong>${s.tipo}</strong><span style="font-size:0.8rem;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:0.85rem;">🔧 ${s.tecnico}</div><div style="font-size:0.85rem;margin-top:2px;">${s.descripcion}</div>${s.proximoMantenimiento?`<div style="font-size:0.82rem;color:#b45309;margin-top:4px;">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`).join('')}</div>`; return true; }
 
-function renderHistorial() {
-    const e=getEq(selectedEquipoId); if(!e){ goTo('clientes'); return ''; }
-    const ent=getEntidad(e.clienteId); const nombreEnt=ent?ent.nombre:'Sin entidad';
-    const ss=getServiciosEquipo(e.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
-    return `<div class="page"><div class="det-hdr"><button class="back" onclick="goTo('detalleCliente','${e.clienteId}')">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion||''} · ${nombreEnt}</div></div></div><div style="margin-bottom:2rem;"><span style="font-weight:700;">Historial (${ss.length})</span></div>${ss.map(s=>`<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span style="font-size:2rem;color:var(--hint);">${fmtFecha(s.fecha)}</span></div><div class="si-info">🔧 ${s.tecnico}</div><div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}<div class="fotos-strip">${(s.fotos||[]).map(f=>`<img class="fthumb" src="${f}" loading="lazy">`).join('')}</div><div class="si-top" style="justify-content:flex-end;margin-top:4px;">${esAdmin()?`<button class="ib" onclick="eliminarServicio('${s.id}')">🗑️</button>`:''}</div></div>`).join('')}</div>`;
-}
+function renderServicios() { const años=[...new Set(servicios.map(s=>s.fecha?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a); const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return `<div class="page"><div class="sec-head"><h2>Servicios</h2></div><div class="filtros"><select class="fi" id="fAnio"><option value="">Todos los años</option>${años.map(a=>`<option>${a}</option>`).join('')}</select><select class="fi" id="fMes"><option value="">Todos los meses</option>${meses.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select><select class="fi" id="fTipo"><option value="">Todos los tipos</option><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select><select class="fi" id="fCliente"><option value="">Todos los CEDIs/Tiendas</option>${[...clientes.map(c=>`<option value="cliente|${c.id}">CEDI: ${c.nombre}</option>`), ...tiendas.map(t=>`<option value="tienda|${t.id}">TIENDA: ${t.nombre}</option>`)]}</select><select class="fi" id="fTecnico"><option value="">Todos los tecnicos</option>${tecnicos.map(t=>`<option>${t.nombre}</option>`).join('')}</select><button class="btn btn-blue btn-full" onclick="aplicarFiltros()">Aplicar</button><button class="btn btn-gray btn-full" onclick="limpiarFiltros()">Limpiar</button></div><div id="listaServicios"></div></div>`; }
+function aplicarFiltros() { const anio=document.getElementById('fAnio')?.value||''; const mes=document.getElementById('fMes')?.value||''; const tipo=document.getElementById('fTipo')?.value||''; const filtroEntidad=document.getElementById('fCliente')?.value||''; const tec=document.getElementById('fTecnico')?.value||''; let filtrados=[...servicios].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); if(anio) filtrados=filtrados.filter(s=>s.fecha?.startsWith(anio)); if(mes) filtrados=filtrados.filter(s=>s.fecha?.slice(5,7)===mes); if(tipo) filtrados=filtrados.filter(s=>s.tipo===tipo); if(filtroEntidad){ const [tipoEnt,id]=filtroEntidad.split('|'); if(tipoEnt==='cliente') filtrados=filtrados.filter(s=>getEquiposCliente(id).some(e=>e.id===s.equipoId)); else filtrados=filtrados.filter(s=>getEquiposTienda(id).some(e=>e.id===s.equipoId)); } if(tec) filtrados=filtrados.filter(s=>s.tecnico===tec); const el=document.getElementById('listaServicios'); if(!el) return; if(!filtrados.length){ el.innerHTML='<p class="cc-meta" style="text-align:center;">Sin resultados.</p>'; return; } el.innerHTML=filtrados.map(s=>{ const e=getEq(s.equipoId); const ent=getEntidad(e?.clienteId); return `<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div><div class="si-info">👤 ${ent?.nombre||'N/A'} · ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}</div><div class="si-info">📍 ${e?.ubicacion||''} · 🔧 ${s.tecnico}</div><div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`; }).join(''); }
+function limpiarFiltros() { ['fAnio','fMes','fTipo','fCliente','fTecnico'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; }); aplicarFiltros(); }
+function renderMantenimientos() { const MESES=['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE']; const año=new Date().getFullYear(); const mant=servicios.filter(s=>s.proximoMantenimiento); return `<div class="page"><div class="sec-head"><h2>Agenda ${año}</h2></div><div class="tbl-wrap"><table><thead><tr><th>Mes</th><th>Fecha</th><th>Cliente</th><th>Activo</th><th></th></tr></thead><tbody>${MESES.map((mes,idx)=>{ const mp=String(idx+1).padStart(2,'0'); const lista=mant.filter(m=>m.proximoMantenimiento?.startsWith(`${año}-${mp}`)); if(!lista.length) return `<tr><td style="color:var(--hint);">${mes}</td><td colspan="4" style="color:#cbd5e1;">—</td></tr>`; return lista.map((m,i)=>{ const e=getEq(m.equipoId); const ent=getEntidad(e?.clienteId); return `<tr>${i===0?`<td rowspan="${lista.length}" style="font-weight:700;background:var(--bg2);">${mes}</td>`:''}<td>${fmtFecha(m.proximoMantenimiento)}</td><td>${ent?.nombre||'N/A'}</td><td>${e?`${e.marca} ${e.tipo||''} ${e.modelo}`:'N/A'}</td><td><button class="rec-btn" onclick="modalRecordar('${e?.clienteId}','${e?.id}','${m.proximoMantenimiento}')">📱</button></td></tr>`; }).join(''); }).join('')}</tbody></table></div></div>`; }
+function obtenerGPS(latId,lngId) { if(!navigator.geolocation){ toast('⚠️ GPS no disponible'); return; } navigator.geolocation.getCurrentPosition(pos=>{ document.getElementById(latId).value=pos.coords.latitude.toFixed(6); document.getElementById(lngId).value=pos.coords.longitude.toFixed(6); toast('✅ Ubicacion capturada'); },()=>toast('⚠️ No se pudo obtener GPS')); }
+function modalRecordar(clienteId,equipoId,fecha) { const e=getEq(equipoId); const ent=getEntidad(clienteId); const fechaF=fmtFechaLarga(fecha); let tel,destinatario,msg; if(ent){ tel=ent.telefono; destinatario=`${ent.coordinador} · SAP ${ent.sap}`; msg=`Hola *${ent.coordinador}*, recordatorio: activo *${e?.marca} ${e?.tipo||''} ${e?.modelo}* (${ent.tipoEntidad==='cliente'?'CEDI':'Tienda'} ${ent.nombre}) requiere mantenimiento el *${fechaF}*. Confirmar visita. Coordinador Mtto 📞 3239454477`; } else { tel='3239454477'; destinatario='Coordinador'; msg=`Recordatorio: activo *${e?.marca} ${e?.modelo}* requiere mantenimiento el *${fechaF}*.`; } showModal(`<div class="modal"><div class="modal-h"><h3>📱 Recordatorio WhatsApp</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div class="ec-meta">Para <strong>${destinatario}</strong> · 📞 ${tel}</div><div class="wa-bubble">${msg}</div><textarea class="fi" id="waMsgEdit" rows="4">${msg}</textarea><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-wa" onclick="enviarWhatsApp('${tel}')">📱 Abrir WhatsApp</button></div></div></div>`); }
+function enviarWhatsApp(tel) { const msg=document.getElementById('waMsgEdit')?.value||''; const telLimpio='57'+tel.replace(/\D/g,''); window.open(`https://wa.me/${telLimpio}?text=${encodeURIComponent(msg)}`,'_blank'); closeModal(); toast('📱 WhatsApp abierto'); }
 
 function renderTecnicos() {
     return `<div class="page"><div class="sec-head"><h2>Tecnicos (${tecnicos.length})</h2>${esAdmin()?`<button class="btn btn-blue btn-sm" onclick="modalNuevoTecnico()">+ Nuevo</button>`:''}</div>
@@ -546,54 +596,11 @@ function modalEditarTecnico(tid) { const t=getTec(tid); showModal(`<div class="m
 async function actualizarTecnico(tid) { const data={ nombre:document.getElementById('etNombre').value, cedula:document.getElementById('etCedula').value, telefono:document.getElementById('etTel').value, cargo:document.getElementById('etCargo').value, rol:document.getElementById('etRol').value }; const newClave=document.getElementById('etClave')?.value?.trim(); if(newClave && newClave.length===4) data.clave=newClave; try { await updateDoc(doc(db,'tecnicos',tid),data); closeModal(); await cargarDatos(); toast('✅ Tecnico actualizado'); } catch(err){ toast('❌ Error: '+err.message); } }
 async function eliminarTecnico(tid) { if(!confirm('¿Eliminar este tecnico?')) return; try{ await deleteDoc(doc(db,'tecnicos',tid)); await cargarDatos(); toast('🗑️ Tecnico eliminado'); } catch(err){ toast('❌ Error: '+err.message); } }
 
-function modalRecordar(clienteId,equipoId,fecha) { const e=getEq(equipoId); const ent=getEntidad(clienteId); const fechaF=fmtFechaLarga(fecha); let tel,destinatario,msg; if(ent){ tel=ent.telefono; destinatario=`${ent.coordinador} · SAP ${ent.sap}`; msg=`Hola *${ent.coordinador}*, recordatorio: activo *${e?.marca} ${e?.tipo||''} ${e?.modelo}* (${ent.tipoEntidad==='cliente'?'CEDI':'Tienda'} ${ent.nombre}) requiere mantenimiento el *${fechaF}*. Confirmar visita. Coordinador Mtto 📞 3239454477`; } else { tel='3239454477'; destinatario='Coordinador'; msg=`Recordatorio: activo *${e?.marca} ${e?.modelo}* requiere mantenimiento el *${fechaF}*.`; } showModal(`<div class="modal"><div class="modal-h"><h3>📱 Recordatorio WhatsApp</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div class="ec-meta">Para <strong>${destinatario}</strong> · 📞 ${tel}</div><div class="wa-bubble">${msg}</div><textarea class="fi" id="waMsgEdit" rows="4">${msg}</textarea><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-wa" onclick="enviarWhatsApp('${tel}')">📱 Abrir WhatsApp</button></div></div></div>`); }
-function enviarWhatsApp(tel) { const msg=document.getElementById('waMsgEdit')?.value||''; const telLimpio='57'+tel.replace(/\D/g,''); window.open(`https://wa.me/${telLimpio}?text=${encodeURIComponent(msg)}`,'_blank'); closeModal(); toast('📱 WhatsApp abierto'); }
-
-function renderServicios() { const años=[...new Set(servicios.map(s=>s.fecha?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a); const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return `<div class="page"><div class="sec-head"><h2>Servicios</h2></div><div class="filtros"><select class="fi" id="fAnio"><option value="">Todos los años</option>${años.map(a=>`<option>${a}</option>`).join('')}</select><select class="fi" id="fMes"><option value="">Todos los meses</option>${meses.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select><select class="fi" id="fTipo"><option value="">Todos los tipos</option><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select><select class="fi" id="fCliente"><option value="">Todos los CEDIs/Tiendas</option>${[...clientes.map(c=>`<option value="cliente|${c.id}">CEDI: ${c.nombre}</option>`), ...tiendas.map(t=>`<option value="tienda|${t.id}">TIENDA: ${t.nombre}</option>`)]}</select><select class="fi" id="fTecnico"><option value="">Todos los tecnicos</option>${tecnicos.map(t=>`<option>${t.nombre}</option>`).join('')}</select><button class="btn btn-blue btn-full" onclick="aplicarFiltros()">Aplicar</button><button class="btn btn-gray btn-full" onclick="limpiarFiltros()">Limpiar</button></div><div id="listaServicios"></div></div>`; }
-function aplicarFiltros() { const anio=document.getElementById('fAnio')?.value||''; const mes=document.getElementById('fMes')?.value||''; const tipo=document.getElementById('fTipo')?.value||''; const filtroEntidad=document.getElementById('fCliente')?.value||''; const tec=document.getElementById('fTecnico')?.value||''; let filtrados=[...servicios].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); if(anio) filtrados=filtrados.filter(s=>s.fecha?.startsWith(anio)); if(mes) filtrados=filtrados.filter(s=>s.fecha?.slice(5,7)===mes); if(tipo) filtrados=filtrados.filter(s=>s.tipo===tipo); if(filtroEntidad){ const [tipoEnt,id]=filtroEntidad.split('|'); if(tipoEnt==='cliente') filtrados=filtrados.filter(s=>getEquiposCliente(id).some(e=>e.id===s.equipoId)); else filtrados=filtrados.filter(s=>getEquiposTienda(id).some(e=>e.id===s.equipoId)); } if(tec) filtrados=filtrados.filter(s=>s.tecnico===tec); const el=document.getElementById('listaServicios'); if(!el) return; if(!filtrados.length){ el.innerHTML='<p class="cc-meta" style="text-align:center;">Sin resultados.</p>'; return; } el.innerHTML=filtrados.map(s=>{ const e=getEq(s.equipoId); const ent=getEntidad(e?.clienteId); return `<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div><div class="si-info">👤 ${ent?.nombre||'N/A'} · ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}</div><div class="si-info">📍 ${e?.ubicacion||''} · 🔧 ${s.tecnico}</div><div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`; }).join(''); }
-function limpiarFiltros() { ['fAnio','fMes','fTipo','fCliente','fTecnico'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; }); aplicarFiltros(); }
-function renderMantenimientos() { const MESES=['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE']; const año=new Date().getFullYear(); const mant=servicios.filter(s=>s.proximoMantenimiento); return `<div class="page"><div class="sec-head"><h2>Agenda ${año}</h2></div><div class="tbl-wrap"><table><thead><tr><th>Mes</th><th>Fecha</th><th>Cliente</th><th>Activo</th><th></th></tr></thead><tbody>${MESES.map((mes,idx)=>{ const mp=String(idx+1).padStart(2,'0'); const lista=mant.filter(m=>m.proximoMantenimiento?.startsWith(`${año}-${mp}`)); if(!lista.length) return `<tr><td style="color:var(--hint);">${mes}</td><td colspan="4" style="color:#cbd5e1;">—</td></tr>`; return lista.map((m,i)=>{ const e=getEq(m.equipoId); const ent=getEntidad(e?.clienteId); return `<tr>${i===0?`<td rowspan="${lista.length}" style="font-weight:700;background:var(--bg2);">${mes}</td>`:''}<td>${fmtFecha(m.proximoMantenimiento)}</td><td>${ent?.nombre||'N/A'}</td><td>${e?`${e.marca} ${e.tipo||''} ${e.modelo}`:'N/A'}</td><td><button class="rec-btn" onclick="modalRecordar('${e?.clienteId}','${e?.id}','${m.proximoMantenimiento}')">📱</button></td></tr>`; }).join(''); }).join('')}</tbody></table></div></div>`; }
-function obtenerGPS(latId,lngId) { if(!navigator.geolocation){ toast('⚠️ GPS no disponible'); return; } navigator.geolocation.getCurrentPosition(pos=>{ document.getElementById(latId).value=pos.coords.latitude.toFixed(6); document.getElementById(lngId).value=pos.coords.longitude.toFixed(6); toast('✅ Ubicacion capturada'); },()=>toast('⚠️ No se pudo obtener GPS')); }
 async function subirCSVJMC(input) { const file=input.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=async ev=>{ const lines=ev.target.result.split('\n').filter(l=>l.trim()); if(lines.length<2){ toast('⚠️ CSV vacío'); return; } const encabezados=lines[0].split(',').map(h=>h.trim().toUpperCase()); const idxSap=encabezados.indexOf('SAP'); const idxTienda=encabezados.indexOf('TIENDA'); const idxCiudad=encabezados.indexOf('CIUDAD'); const idxDepto=encabezados.indexOf('DEPARTAMENTO'); const idxDir=encabezados.indexOf('DIRECCION'); const idxCoord=encabezados.indexOf('COORDINADOR'); const idxCargo=encabezados.indexOf('CARGO'); const idxTel=encabezados.indexOf('TELEFONO'); if(idxSap===-1||idxTienda===-1){ toast('⚠️ El CSV debe tener columnas SAP y TIENDA'); return; } const cedis=[]; const tiendasCSV=[]; for(let i=1;i<lines.length;i++){ const cols=lines[i].split(',').map(c=>c.trim().replace(/^"|"$/g,'')); if(cols.length<Math.max(idxSap,idxTienda,idxCiudad,idxDepto,idxDir,idxCoord,idxCargo,idxTel)+1) continue; const sap=cols[idxSap]; const nombre=cols[idxTienda]; const ciudad=idxCiudad!==-1?cols[idxCiudad]:''; const departamento=idxDepto!==-1?cols[idxDepto]:''; const direccion=idxDir!==-1?cols[idxDir]:''; const coordinador=idxCoord!==-1?cols[idxCoord]:''; const cargo=idxCargo!==-1?cols[idxCargo]:''; const telefono=idxTel!==-1?cols[idxTel]:''; if(!sap||!nombre) continue; const item={sap,nombre,ciudad,departamento,direccion,coordinador,cargo,telefono,latitud:'',longitud:''}; if(nombre.toUpperCase().includes('CEDI')) cedis.push(item); else tiendasCSV.push(item); } const guardarBatch=async(items,coleccion)=>{ const batch=writeBatch(db); const colRef=collection(db,coleccion); for(const item of items){ const docRef=doc(colRef); batch.set(docRef,item); } await batch.commit(); }; if(cedis.length) await guardarBatch(cedis,'clientes'); if(tiendasCSV.length) await guardarBatch(tiendasCSV,'tiendas'); input.value=''; await cargarDatos(); toast(`✅ ${cedis.length} CEDIs y ${tiendasCSV.length} Tiendas guardadas`); }; reader.readAsText(file,'UTF-8'); }
 function descargarPlantillaCSV() { const enc='SAP,TIENDA,CIUDAD,DEPARTAMENTO,DIRECCION,COORDINADOR,CARGO,TELEFONO'; const ejemplo='170,Chia - Centro - Calle 13,Chia,Cundinamarca,Calle 13 # 9-43,Edgar Amado,Coordinador Sr Mantenimiento,3107935104'; const csv=[enc,ejemplo].join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='plantilla_cedis_tiendas.csv'; a.click(); URL.revokeObjectURL(url); toast('📄 Plantilla descargada'); }
+function puedeEditar(creadoPor) { return esAdmin() || sesionActual?.nombre === creadoPor; }
 
-window.goTo=goTo;
-window.closeModal=closeModal;
-window.filtrarClientes=filtrarClientes;
-window.filtrarTiendas=filtrarTiendas;
-window.aplicarFiltros=aplicarFiltros;
-window.limpiarFiltros=limpiarFiltros;
-window.modalNuevoCliente=modalNuevoCliente;
-window.modalEditarCliente=modalEditarCliente;
-window.modalEliminarCliente=modalEliminarCliente;
-window.actualizarCliente=actualizarCliente;
-window.modalNuevaTienda=modalNuevaTienda;
-window.modalEditarTienda=modalEditarTienda;
-window.modalEliminarTienda=modalEliminarTienda;
-window.actualizarTienda=actualizarTienda;
-window.modalNuevoEquipo=modalNuevoEquipo;
-window.modalEditarEquipo=modalEditarEquipo;
-window.modalEliminarEquipo=modalEliminarEquipo;
-window.modalNuevoServicio=modalNuevoServicio;
-window.modalEditarServicio=modalEditarServicio;
-window.eliminarServicio=eliminarServicio;
-window.modalNuevoTecnico=modalNuevoTecnico;
-window.modalEditarTecnico=modalEditarTecnico;
-window.modalRecordar=modalRecordar;
-window.enviarWhatsApp=enviarWhatsApp;
-window.generarInformePDF=generarInformePDF;
-window.modalQR=modalQR;
-window.obtenerGPS=obtenerGPS;
-window.previewFoto=previewFoto;
-window.borrarFoto=borrarFoto;
-window.onTipoChange=onTipoChange;
-window.abrirLogin=abrirLogin;
-window.mlPin=mlPin;
-window.mlDel=mlDel;
-window.mlLogin=mlLogin;
-window.cerrarSesion=cerrarSesion;
-window.subirCSVJMC=subirCSVJMC;
-window.descargarPlantillaCSV=descargarPlantillaCSV;
+window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarTiendas=filtrarTiendas; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevaTienda=modalNuevaTienda; window.modalEditarTienda=modalEditarTienda; window.modalEliminarTienda=modalEliminarTienda; window.actualizarTienda=actualizarTienda; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR; window.obtenerGPS=obtenerGPS; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.subirCSVJMC=subirCSVJMC; window.descargarPlantillaCSV=descargarPlantillaCSV;
 
 document.querySelectorAll('.bni').forEach(btn=>{ btn.addEventListener('click',()=>{ const page=btn.dataset.page; if(!sesionActual && page!=='panel' && page!=='tecnicos'){ toast('🔒 Inicia sesion desde Tecnicos'); return; } goTo(page); }); });
 
