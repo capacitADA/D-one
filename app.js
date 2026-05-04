@@ -462,7 +462,7 @@ function renderEquipos() {
         ${equipos.map(e => {
             const c = getCl(e.clienteId);
             return `<div class="ec" data-search="${(e.marca+e.modelo+(c?.nombre||'')).toLowerCase()}">
-                <div class="ec-name">${e.marca} ${e.modelo}</div>
+                <div class="ec-name">${e.marca} ${e.tipo || ''} ${e.modelo}</div>
                 <div class="ec-meta">👤 ${c?.nombre||'Sin cliente'} · 📍 ${e.ubicacion}</div>
                 <div class="ec-btns">
                     <button class="ab" onclick="goTo('historial','${e.clienteId}','${e.id}')">📋 Servicios</button>
@@ -519,7 +519,7 @@ function aplicarFiltros() {
         const c = getCl(e?.clienteId);
         return `<div class="si">
             <div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div>
-            <div class="si-info">👤 ${c?.nombre||'N/A'} · ${e?.marca||''} ${e?.modelo||''}</div>
+            <div class="si-info">👤 ${c?.nombre||'N/A'} · ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}</div>
             <div class="si-info">📍 ${e?.ubicacion||''} · 🔧 ${s.tecnico}</div>
             <div class="si-info">${s.descripcion}</div>
             ${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}
@@ -553,7 +553,7 @@ function renderMantenimientos() {
                             ${i===0?`<td rowspan="${lista.length}" style="font-weight:700;background:var(--bg2);">${mes}<\/td>`:''}
                             <td>${fmtFecha(m.proximoMantenimiento)}<\/td>
                             <td>${c?.nombre||'N/A'}<\/td>
-                            <td>${e?`${e.marca} ${e.modelo}`:'N/A'}<\/td>
+                            <td>${e?`${e.marca} ${e.tipo || ''} ${e.modelo}`:'N/A'}<\/td>
                             <td><button class="rec-btn" onclick="modalRecordar('${e?.clienteId}','${e?.id}','${m.proximoMantenimiento}')">📱<\/button><\/td>
                         </tr>`;
                     }).join('');
@@ -627,7 +627,7 @@ function modalRecordar(clienteId, equipoId, fecha) {
         if (tienda) {
             tel = tienda.telefono;
             destinatario = `${tienda.coordinador} · SAP ${sap}`;
-            msg = `Hola *${tienda.coordinador}*, recordatorio: activo *${e?.marca} ${e?.modelo}* tienda *${tienda.tienda} (SAP ${sap})* requiere mantenimiento el *${fechaF}*. Confirmar visita. Coordinador Mtto 📞 3239454477`;
+            msg = `Hola *${tienda.coordinador}*, recordatorio: activo *${e?.marca} ${e?.tipo || ''} ${e?.modelo}* tienda *${tienda.tienda} (SAP ${sap})* requiere mantenimiento el *${fechaF}*. Confirmar visita. Coordinador Mtto 📞 3239454477`;
         } else { tel = c?.telefono; destinatario = c?.nombre; msg = `Hola *${c?.nombre}*, recordatorio: activo *${e?.marca} ${e?.modelo}* ubicado en *${e?.ubicacion}* requiere mantenimiento el *${fechaF}*. Coordinador Mtto 📞 3239454477`; }
     } else { tel = c?.telefono; destinatario = c?.nombre; msg = `Hola *${c?.nombre}*, recordatorio: activo *${e?.marca} ${e?.modelo}* requiere mantenimiento el *${fechaF}*. Coordinador mtto 📞 3239454477`; }
     showModal(`<div class="modal"><div class="modal-h"><h3>📱 Recordatorio WhatsApp</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div class="ec-meta">Para <strong>${destinatario}</strong> · 📞 ${tel}</div><div class="wa-bubble">${msg}</div><textarea class="fi" id="waMsgEdit" rows="4">${msg}</textarea><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-wa" onclick="enviarWhatsApp('${tel}')">📱 Abrir WhatsApp</button></div></div></div>`);
@@ -814,28 +814,28 @@ function modalInformeJMC(eid) {
 
     showModal(`<div class="modal modal-wide"><div class="modal-h" style="background:#1e3a6e;"><h3>📋 Informe Jeronimo Martins — FF-JMC-DT-06</h3><button class="xbtn" onclick="closeModal()">✕</button></div>
         <div class="modal-b">
-            <div style="background:#0d4a3a;color:white;text-align:center;padding:4px;margin-bottom:6px;border-radius:4px;">CONTRATISTA</div>
+            <div style="background:#d10000;color:white;text-align:center;padding:4px;margin-bottom:6px;border-radius:4px;">CONTRATISTA</div>
             <div class="fr"><div><label class="fl">Razon social</label><input class="fi" value="D1 coordinador Mtto CEDI" readonly></div><div><label class="fl">NIT</label><input class="fi" value="901.050.468-5" readonly></div></div>
             <div class="fr"><div><label class="fl">Contacto</label><input class="fi" value="Osca" readonly></div><div><label class="fl">Telefono</label><input class="fi" value="3239454477" readonly></div></div>
-            <div style="background:#0d4a3a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">SOLICITANTE Y TIENDA</div>
+            <div style="background:#d10000;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">SOLICITANTE Y TIENDA</div>
             <div class="fr"><div><label class="fl">Nombre solicitante</label><input class="fi" id="jNombreSol" value="${tienda?.coordinador||''}" readonly></div><div><label class="fl">Cargo</label><input class="fi" id="jCargo" value="${tienda?.cargo||''}" readonly></div></div>
             <div class="fr"><div><label class="fl">Nombre tienda</label><input class="fi" id="jTienda" value="${tienda?.tienda||''}" readonly></div><div><label class="fl">N° Tienda (SAP)</label><input class="fi" id="jSAP" value="${sapActual||''}" readonly></div></div>
             <div class="fr"><div><label class="fl">N° Ticket</label><input class="fi" id="jTicket" placeholder="TK-..."></div><div><label class="fl">Fecha</label><div style="display:flex;gap:4px;"><input class="fi" id="jDD" placeholder="DD" value="${dd}" style="width:33%;"><input class="fi" id="jMM" placeholder="MM" value="${mm}" style="width:33%;"><input class="fi" id="jAA" placeholder="AA" value="${aa}" style="width:33%;"></div></div></div>
             <div class="fr"><div><label class="fl">Municipio</label><input class="fi" id="jMunicipio" value="${tienda?.ciudad||''}" readonly></div><div><label class="fl">Departamento</label><input class="fi" id="jDepartamento" value="${tienda?.departamento||''}" readonly></div></div>
-            <div style="background:#0d4a3a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">INFORMACION TECNICA</div>
+            <div style="background:#d10000;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">INFORMACION TECNICA</div>
             <div class="fr"><div><label class="fl">Nombre del equipo</label><input class="fi" id="jEquipo" value="${e?.modelo||''}" readonly></div><div><label class="fl">Marca</label><input class="fi" id="jMarca" value="${e?.marca||''}" readonly></div></div>
             <div><label class="fl">Serial</label><input class="fi" id="jSerial" value="${e?.serie||''}" readonly></div>
-            <div style="background:#0d4a3a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">TIPO DE ASISTENCIA</div>
+            <div style="background:#d10000;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">TIPO DE ASISTENCIA</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;">${['Reparacion','Garantia','Ajuste','Modificacion','Servicio','Mejora','Combinacion'].map(t=>`<label><input type="radio" name="jTipoAsi" value="${t}" ${t==='Reparacion'?'checked':''}> ${t}</label>`).join('')}</div>
-            <div style="background:#0d4a3a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">TIPO DE FALLA</div>
+            <div style="background:##d10000;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">TIPO DE FALLA</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;">${['Mecanicas','Material','Instrumentos','Electricas','Influencia Externa'].map(t=>`<label><input type="radio" name="jTipoFalla" value="${t}"> ${t}</label>`).join('')}</div>
-            <div style="background:#0d4a3a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">CAUSA DE FALLAS</div>
+            <div style="background:#d10000;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">CAUSA DE FALLAS</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;">${['Diseno','Fabricacion/Instalacion','Operacion/Mantenimiento','Administracion','Desconocida'].map(t=>`<label><input type="radio" name="jCausa" value="${t}"> ${t}</label>`).join('')}</div>
             <label class="fl">Descripcion de la falla</label><textarea class="fi" id="jDescFalla" rows="2"></textarea>
             <label class="fl">Diagnostico del tecnico</label><textarea class="fi" id="jDiag" rows="3"></textarea>
             <label class="fl">Repuestos cambiados</label><textarea class="fi" id="jRepuestos" rows="2"></textarea>
             <label class="fl">Observaciones</label><textarea class="fi" id="jObs" rows="2"></textarea>
-            <div style="background:#0d4a3a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">CONSTANCIA</div>
+            <div style="background:#d10000;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">CONSTANCIA</div>
             <div class="fr"><div><label class="fl">Tecnico encargado</label><input class="fi" value="${sesionActual?.nombre||''}" readonly></div><div><label class="fl">Cedula</label><input class="fi" value="${sesionActual?.cedula||''}" readonly></div></div>
             <div class="fr"><div><label class="fl">Hora entrada</label><input class="fi" type="time" id="jHEntrada"></div><div><label class="fl">Hora salida</label><input class="fi" type="time" id="jHSalida"></div></div>
             <div class="fr"><div><label class="fl">Nombre funcionario</label><input class="fi" id="jFuncNombre"></div><div><label class="fl">Cedula</label><input class="fi" id="jFuncCedula"></div></div>
@@ -1415,7 +1415,7 @@ function generarInformePDF(eid) {
             : '';
         return `<div style="border:1px solid #d1d5db;border-radius:8px;padding:12px;margin-bottom:10px;page-break-inside:avoid;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-                <span style="background:${s.tipo==='Mantenimiento'?'#1d4ed8':s.tipo==='Reparacion'?'#dc2626':'#15803d'};color:white;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">${s.tipo}</span>
+                <span style="background:${s.tipo==='Mantenimiento'?'#1d4ed8':s.tipo==='Reparacion'?'#dc2626':'#d10000'};color:white;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">${s.tipo}</span>
                 <span style="font-size:16px;color:#555;">${fmtFecha(s.fecha)}</span>
             </div>
             <div style="font-size:16px;color:#374151;margin:3px 0;">&#128295; ${s.tecnico}</div>
@@ -1431,7 +1431,7 @@ function generarInformePDF(eid) {
   @media print{html,body{margin:0;padding:0;}}
   body{font-family:Arial,sans-serif;font-size:11px;color:#111;margin:0;padding:0;}
 </style></head><body>
-<div style="display:flex;align-items:center;border-bottom:3px solid #0d4a3a;padding-bottom:10px;margin-bottom:12px;">
+<div style="display:flex;align-items:center;border-bottom:3px solid #d10000;padding-bottom:10px;margin-bottom:12px;">
   <img src="${LOGO}" style="height:64px;margin-right:18px;" onerror="this.style.display='none'">
   <div>
     <div style="font-size:14px;color:#555;">Plantas y Sistemas Electricos &nbsp;|&nbsp; 📞 311 483 1801</div>
@@ -1444,10 +1444,10 @@ function generarInformePDF(eid) {
     <td style="padding:6px 10px;background:#f1f5f9;border:1px solid #ddd;font-size:14px;-webkit-print-color-adjust:exact;print-color-adjust:exact;"><strong>Generado:</strong> ${new Date().toLocaleString()}</td>
   </tr>
   <tr>
-    <td style="padding:6px 10px;border:1px solid #ddd;font-size:14px;" colspan="2"><strong>Activo:</strong> ${e?.tipo||''} ${e?.marca||''} ${e?.modelo||''} &nbsp;&nbsp; <strong>Serial:</strong> ${e?.serie || 'N/A'} &nbsp;&nbsp; <strong>Ubicacion:</strong> ${e?.ubicacion||''}</td>
+    <td style="padding:6px 10px;border:1px solid #ddd;font-size:14px;" colspan="2"><strong>Activo:</strong> ${e?.tipo||''} ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} &nbsp;&nbsp; <strong>Serial:</strong> ${e?.serie || 'N/A'} &nbsp;&nbsp; <strong>Ubicacion:</strong> ${e?.ubicacion||''}</td>
   </tr>
 </table>
-<div style="background:#0d4a3a;color:white;font-weight:700;font-size:15px;padding:7px 12px;border-radius:4px;margin-bottom:10px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
+<div style="background:#d10000;color:white;font-weight:700;font-size:15px;padding:7px 12px;border-radius:4px;margin-bottom:10px;-webkit-print-color-adjust:exact;print-color-adjust:exact;">
   HISTORIAL DE SERVICIOS &nbsp;&nbsp; <span style="font-weight:400;font-size:13px;">${ss.length} registro(s)</span>
 </div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">${serviciosHTML}</div>
@@ -1466,7 +1466,7 @@ function modalQR(eid) {
     document.body.appendChild(qrDiv);
     const QRLib = window.QRCode;
     if (!QRLib) { toast('⚠️ QRCode.js no cargado'); return; }
-    new QRLib(qrDiv, { text: url, width: 280, height: 280, colorDark: '#0d4a3a', colorLight: '#ffffff' });
+    new QRLib(qrDiv, { text: url, width: 280, height: 280, colorDark: '#d10000', colorLight: '#ffffff' });
     setTimeout(() => {
         const qrCanvas = qrDiv.querySelector('canvas');
         const qrDataUrl = qrCanvas.toDataURL('image/png');
@@ -1495,12 +1495,12 @@ function modalQR(eid) {
                 // fondo blanco con borde
                 ctx.fillStyle = '#ffffff';
                 ctx.fillRect(0, 0, W, totalH);
-                ctx.strokeStyle = '#0d4a3a';
+                ctx.strokeStyle = '#d10000';
                 ctx.lineWidth = 3;
                 ctx.strokeRect(2, 2, W-4, totalH-4);
 
                 // franja verde superior
-                ctx.fillStyle = '#0d4a3a';
+                ctx.fillStyle = '#d10000';
                 ctx.fillRect(2, 2, W-4, logoH + PAD + 4);
 
                 // logo centrado
@@ -1512,7 +1512,8 @@ function modalQR(eid) {
                 ctx.fillStyle = '#111';
                 ctx.font = 'bold 14px Arial';
                 ctx.textAlign = 'center';
-                const eqLabel = (e?.tipo ? e.tipo + ' · ' : '') + (e?.marca||'') + ' ' + (e?.modelo||'');
+                //const eqLabel = (e?.tipo ? e.tipo + ' · ' : '') + (e?.marca||'') + ' ' + (e?.modelo||'');
+                const eqLabel = (e?.marca||'') + ' ' + (e?.tipo||'') + ' ' + (e?.modelo||'');
                 ctx.fillText(eqLabel, W/2, y + 16);
                 ctx.font = '12px Arial';
                 ctx.fillStyle = '#444';
@@ -1533,7 +1534,7 @@ function modalQR(eid) {
                 const compositeUrl = compCanvas.toDataURL('image/png');
 
                 showModal(`<div class="modal" style="max-width:360px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;">
-                    <img src="${compositeUrl}" style="width:100%;border-radius:8px;border:2px solid #0d4a3a;">
+                    <img src="${compositeUrl}" style="width:100%;border-radius:8px;border:2px solid #d10000;">
                     <a href="${compositeUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a>
                 </div></div>`);
             };
@@ -1566,12 +1567,12 @@ function manejarRutaQR() {
         <div style="text-align:center;margin-bottom:0.75rem;">
             <img src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" style="height:56px;" onerror="this.style.display='none'">
         </div>
-        <div style="background:#0d4a3a;border-radius:14px;padding:14px;color:white;text-align:center;margin-bottom:0.75rem;">
+        <div style="background:#d10000;border-radius:14px;padding:14px;color:white;text-align:center;margin-bottom:0.75rem;">
             <div style="font-size:0.85rem;">¿Necesitas soporte?</div>
             <div style="font-size:2rem;font-weight:700;">311 483 1801</div>
         </div>
         <div style="border:1px solid #ccc;border-radius:12px;padding:1rem;margin-bottom:0.75rem;">
-            <h3 style="margin:0 0 6px;">${e?.tipo ? e.tipo+' · ':'' }${e.marca} ${e.modelo}</h3>
+            <h3 style="margin:0 0 6px;">${e.marca} ${e.tipo||''} ${e.modelo}</h3>
             <p style="margin:2px 0;">📍 ${e.ubicacion}</p>
             <p style="margin:2px 0;">👤 ${c?.nombre}</p>
             <p style="margin:2px 0;font-size:0.8rem;color:#888;">Serie: ${e.serie || 'N/A'}</p>
