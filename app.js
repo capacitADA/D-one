@@ -18,12 +18,12 @@ const db = getFirestore(fbApp);
 let _driveConnected = false;
 function driveIsConnected() { return _driveConnected; }
 async function conectarDriveAuto() {
-    try { await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' }); _driveConnected = true; console.log('✅ Drive conectado'); } 
+    try { await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' }); _driveConnected = true; console.log('✅ Drive conectado'); }
     catch(e) { console.log('⚠️ Drive no disponible'); _driveConnected = false; }
 }
 async function driveUploadPDF(html, filename) {
     if (!filename.endsWith('.pdf')) filename = filename.replace('.html', '') + '.pdf';
-    try { await fetch(APPS_SCRIPT_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html, filename }) }); return true; } 
+    try { await fetch(APPS_SCRIPT_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html, filename }) }); return true; }
     catch(e) { return false; }
 }
 
@@ -50,7 +50,12 @@ async function cargarDatos() {
         tecnicos = tecs.docs.map(d => ({ id:d.id, ...d.data() }));
         jmcTiendas = jmc.docs.map(d => ({ id:d.id, ...d.data() }));
         if(jmcTiendas[0]?.version) jmcTiendasVersion = jmcTiendas[0].version;
-    } catch(err) { console.error(err); toast('⚠️ Error de conexión'); main.innerHTML = '<div class="page"><p>Error</p><button class="btn btn-blue" onclick="location.reload()">Reintentar</button></div>'; return; }
+    } catch(err) {
+        console.error(err);
+        toast('⚠️ Error de conexión');
+        main.innerHTML = '<div class="page"><p>Error de conexión</p><button class="btn btn-blue" onclick="location.reload()">Reintentar</button></div>';
+        return;
+    }
     renderView();
 }
 
@@ -101,7 +106,19 @@ let selectedClienteId = null, selectedTiendaId = null, selectedEquipoId = null;
 let fotosNuevas = [null,null,null];
 let _servicioEidActual = null;
 
-const CIUDADES = ['Bogota','Medellin','Cali','Bucaramanga','Barranquilla','Cucuta','Manizales','Pereira','Ibague','Villavicencio','Giron','Floridablanca','Piedecuesta','Pamplona','Soacha'];
+// FIX: Lista completa de ciudades colombianas — todas las capitales de departamento + municipios principales
+const CIUDADES = [
+    'Arauca','Armenia','Barranquilla','Bogota','Bucaramanga','Buenaventura',
+    'Bello','Cali','Cartagena','Cartago','Cucuta','Dosquebradas',
+    'Envigado','Florencia','Floridablanca','Giron','Ibague','Itagui',
+    'Leticia','Manizales','Medellin','Mitu','Mocoa','Monteria',
+    'Neiva','Palmira','Pamplona','Pasto','Pereira','Piedecuesta',
+    'Popayan','Puerto Carreno','Puerto Inirida','Quibdo','Riohacha',
+    'Samaniego','San Andres','San Jose del Guaviare','Santa Marta',
+    'Sincelejo','Soacha','Sogamoso','Soledad','Tunja','Turbo',
+    'Valledupar','Villavicencio','Yopal'
+].sort();
+
 const TIPOS_DOC = ['CC','CE','PA','NIT','TI'];
 const ESPECIALIDADES = [{id:'mecanico',label:'Mecanico de plantas'},{id:'baja',label:'Electricista baja tension'},{id:'media',label:'Electricista media tension'},{id:'electronico',label:'Electronico'},{id:'ups',label:'UPS'},{id:'planta',label:'Plantas electricas'}];
 
@@ -136,25 +153,56 @@ function renderView() {
     }
 }
 
+// FIX: Panel — preselecciona CEDI cuyo nombre contenga "IBAGUE" (insensible a mayúsculas/tildes).
+// Si no existe, usa el primer CEDI; si no hay CEDIs, usa la primera tienda.
+// FIX: Se elimina el patrón originalRenderPanel + bind(this) que fallaba en módulos ES (this=undefined).
 function renderPanel() {
-    const opciones = [...clientes.map(c => ({ id:c.id, nombre:c.nombre, tipo:'cliente' })), ...tiendas.map(t => ({ id:t.id, nombre:t.nombre, tipo:'tienda' }))];
+    const opcionesCedi = clientes.map(c => ({ id:c.id, nombre:c.nombre, tipo:'cliente' }));
+    const opcionesTienda = tiendas.map(t => ({ id:t.id, nombre:t.nombre, tipo:'tienda' }));
+    const opciones = [...opcionesCedi, ...opcionesTienda];
     if(opciones.length === 0) {
         return `<div class="page"><div class="panel-banner">No hay CEDIs ni Tiendas registradas.</div></div>`;
     }
-    return `<div class="page" id="panelContainer">
-        <div class="selector-panel"><select id="panelSelector" class="fi">${opciones.map(opt => `<option value="${opt.tipo}|${opt.id}">${opt.tipo === 'cliente' ? 'CEDI: ' : 'TIENDA: '}${opt.nombre}</option>`).join('')}</select></div>
+
+    // Buscar CEDI Ibagué
+    const normalize = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    let defaultIdx = opcionesCedi.findIndex(c => normalize(c.nombre).includes('ibague'));
+    if(defaultIdx === -1) defaultIdx = 0; // primer CEDI si no hay Ibagué
+
+    const html = `<div class="page" id="panelContainer">
+        <div class="selector-panel"><select id="panelSelector" class="fi">
+            ${opciones.map((opt, i) => {
+                const selected = i === defaultIdx ? 'selected' : '';
+                return `<option value="${opt.tipo}|${opt.id}" ${selected}>${opt.tipo === 'cliente' ? 'CEDI: ' : 'TIENDA: '}${opt.nombre}</option>`;
+            }).join('')}
+        </select></div>
         <div id="panelStats"></div>
         <div id="panelEquiposFuera"></div>
     </div>`;
+
+    // Iniciar panel después del render
+    setTimeout(() => {
+        const selector = document.getElementById('panelSelector');
+        if(!selector) return;
+        const [tipo, id] = selector.value.split('|');
+        actualizarPanel(id, tipo);
+        selector.addEventListener('change', (e) => {
+            const [newTipo, newId] = e.target.value.split('|');
+            actualizarPanel(newId, newTipo);
+        });
+    }, 100);
+
+    return html;
 }
 
 async function actualizarPanel(entidadId, entidadTipo) {
     const equiposEntidad = equipos.filter(e => e.clienteId === entidadId);
     let operativos=0, fueraServicio=0, darBaja=0, sinInfo=0;
     for(const eq of equiposEntidad) {
+        // FIX: usar solo el ÚLTIMO estado (primer servicio con estadoReparacion al ordenar desc)
         const ss = getServiciosEquipo(eq.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
         let ultimoEstado = null;
-        for(const s of ss) if(s.estadoReparacion) { ultimoEstado = s.estadoReparacion; break; }
+        for(const s of ss) { if(s.estadoReparacion) { ultimoEstado = s.estadoReparacion; break; } }
         if(ultimoEstado === 'OPERATIVO') operativos++;
         else if(ultimoEstado === 'FUERA DE SERVICIO') fueraServicio++;
         else if(ultimoEstado === 'DAR DE BAJA') darBaja++;
@@ -196,9 +244,12 @@ async function actualizarPanel(entidadId, entidadTipo) {
             <div>Instalación <span class="panel-number">${mensualInst}</span></div>
         </div></div>
     </div>`;
+
+    // FIX: solo equipos cuyo ÚLTIMO estado sea "FUERA DE SERVICIO"
     const equiposFuera = equiposEntidad.filter(eq => {
-        const ss = getServiciosEquipo(eq.id);
-        return ss.some(s => s.estadoReparacion === 'FUERA DE SERVICIO');
+        const ss = getServiciosEquipo(eq.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+        for(const s of ss) { if(s.estadoReparacion) return s.estadoReparacion === 'FUERA DE SERVICIO'; }
+        return false;
     });
     let fueraHtml = '<div class="equipos-fuera"><h4>⚙️ Equipos FUERA DE SERVICIO</h4><div class="scroll-horizontal">';
     if(equiposFuera.length === 0) {
@@ -214,17 +265,6 @@ async function actualizarPanel(entidadId, entidadTipo) {
     if(statsDiv) statsDiv.innerHTML = statsHtml;
     if(fueraDiv) fueraDiv.innerHTML = fueraHtml;
 }
-
-function initPanel() {
-    const selector = document.getElementById('panelSelector');
-    if(!selector) return;
-    const [tipo, id] = selector.value.split('|');
-    actualizarPanel(id, tipo);
-    selector.addEventListener('change', (e) => { const [newTipo, newId] = e.target.value.split('|'); actualizarPanel(newId, newTipo); });
-}
-
-const originalRenderPanel = renderPanel;
-renderPanel = function() { const html = originalRenderPanel(); setTimeout(() => { if(document.getElementById('panelSelector')) initPanel(); }, 100); return html; }.bind(this);
 
 function renderClientes() {
     return `<div class="page"><div class="sec-head"><h2>CEDIs (${clientes.length})</h2><button class="btn btn-blue btn-sm" onclick="modalNuevoCliente()">+ Nuevo</button></div>
@@ -477,20 +517,72 @@ async function eliminarEquipo(eid) {
     try { for(const s of ss) await deleteDoc(doc(db,'servicios',s.id)); await deleteDoc(doc(db,'equipos',eid)); await cargarDatos(); toast('🗑️ Activo eliminado'); } catch(err) { toast('❌ Error: '+err.message); }
 }
 
+// FIX: font-size de fecha corregido de 2rem a 0.82rem
 function renderHistorial() {
     const e = getEq(selectedEquipoId); if(!e) { goTo('clientes'); return ''; }
     const ent = getEntidad(e.clienteId); const nombreEnt = ent ? ent.nombre : 'Sin entidad';
     const ss = getServiciosEquipo(e.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
-    return `<div class="page"><div class="det-hdr"><button class="back" onclick="goTo('detalleCliente','${e.clienteId}')">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion||''} · ${nombreEnt}</div></div></div>
-        <div style="margin-bottom:2rem;"><span style="font-weight:700;">Historial (${ss.length})</span></div>
-        ${ss.map(s=>`<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span style="font-size:2rem;color:var(--hint);">${fmtFecha(s.fecha)}</span></div><div class="si-info">🔧 ${s.tecnico}</div><div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}<div class="fotos-strip">${(s.fotos||[]).map(f=>`<img class="fthumb" src="${f}" loading="lazy">`).join('')}</div><div class="si-top" style="justify-content:flex-end;margin-top:4px;">${puedeEditar(s.tecnico)?`<button class="ib" onclick="modalEditarServicio('${s.id}')">✏️</button>`:''}${esAdmin()?`<button class="ib" onclick="eliminarServicio('${s.id}')">🗑️</button>`:''}</div></div>`).join('')}
+    // Volver al detalle correcto según tipo de entidad
+    const backTarget = ent?.tipoEntidad === 'tienda' ? `goTo('detalleTienda','${e.clienteId}')` : `goTo('detalleCliente','${e.clienteId}')`;
+    return `<div class="page"><div class="det-hdr"><button class="back" onclick="${backTarget}">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion||''} · ${nombreEnt}</div></div></div>
+        <div style="margin-bottom:0.65rem;"><span style="font-weight:700;">Historial (${ss.length})</span></div>
+        ${ss.map(s=>`<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span style="font-size:0.82rem;color:var(--hint);">${fmtFecha(s.fecha)}</span></div><div class="si-info">🔧 ${s.tecnico}</div>${s.estadoReparacion?`<div class="si-info"><strong>Estado:</strong> ${s.estadoReparacion}</div>`:''}<div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}<div class="fotos-strip">${(s.fotos||[]).map(f=>`<img class="fthumb" src="${f}" loading="lazy">`).join('')}</div><div class="si-top" style="justify-content:flex-end;margin-top:4px;">${puedeEditar(s.tecnico)?`<button class="ib" onclick="modalEditarServicio('${s.id}')">✏️</button>`:''}${esAdmin()?`<button class="ib" onclick="eliminarServicio('${s.id}')">🗑️</button>`:''}</div></div>`).join('')}
     </div>`;
 }
 
-function fileToBase64(file) { return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onload=()=>resolve(reader.result); reader.onerror=reject; reader.readAsDataURL(file); }); }
-function onTipoChange() { const tipo=document.getElementById('sTipo')?.value; const mantBox=document.getElementById('mantBox'); const reparacionBox=document.getElementById('reparacionBox'); if(mantBox) mantBox.classList.toggle('hidden',tipo!=='Mantenimiento'); if(reparacionBox) reparacionBox.classList.toggle('hidden',tipo!=='Reparacion'); }
-function previewFoto(input,idx) { if(!input.files||!input.files[0]) return; fotosNuevas[idx]=input.files[0]; const reader=new FileReader(); reader.onload=e=>{ const slot=document.getElementById('fslot'+idx); if(slot) slot.innerHTML=`<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;"><button class="fslot-del" onclick="borrarFoto(event,${idx})">✕</button><input type="file" id="finput${idx}" accept="image/*" style="display:none" onchange="previewFoto(this,${idx})">`; }; reader.readAsDataURL(input.files[0]); }
-function borrarFoto(e,idx) { e.stopPropagation(); fotosNuevas[idx]=null; const slot=document.getElementById('fslot'+idx); if(slot){ slot.innerHTML=`<div class="fslot-plus">+</div><div class="fslot-lbl">Foto ${idx+1}</div><input type="file" id="finput${idx}" accept="image/*" style="display:none" onchange="previewFoto(this,${idx})">`; slot.onclick=()=>document.getElementById('finput'+idx).click(); } }
+// FIX: compresión de imagen antes de convertir a base64 (max 800px, calidad 0.7)
+function comprimirFoto(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = ev => {
+            const img = new Image();
+            img.onload = () => {
+                const MAX = 800;
+                let w = img.width, h = img.height;
+                if (w > MAX || h > MAX) {
+                    if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+                    else { w = Math.round(w * MAX / h); h = MAX; }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL('image/jpeg', 0.7));
+            };
+            img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+function onTipoChange() {
+    const tipo = document.getElementById('sTipo')?.value;
+    const mantBox = document.getElementById('mantBox');
+    const reparacionBox = document.getElementById('reparacionBox');
+    if(mantBox) mantBox.classList.toggle('hidden', tipo !== 'Mantenimiento');
+    if(reparacionBox) reparacionBox.classList.toggle('hidden', tipo !== 'Reparacion');
+}
+
+function previewFoto(input,idx) {
+    if(!input.files||!input.files[0]) return;
+    fotosNuevas[idx]=input.files[0];
+    const reader=new FileReader();
+    reader.onload=e=>{
+        const slot=document.getElementById('fslot'+idx);
+        if(slot) slot.innerHTML=`<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;"><button class="fslot-del" onclick="borrarFoto(event,${idx})">✕</button><input type="file" id="finput${idx}" accept="image/*" style="display:none" onchange="previewFoto(this,${idx})">`;
+    };
+    reader.readAsDataURL(input.files[0]);
+}
+
+function borrarFoto(e,idx) {
+    e.stopPropagation();
+    fotosNuevas[idx]=null;
+    const slot=document.getElementById('fslot'+idx);
+    if(slot){
+        slot.innerHTML=`<div class="fslot-plus">+</div><div class="fslot-lbl">Foto ${idx+1}</div><input type="file" id="finput${idx}" accept="image/*" style="display:none" onchange="previewFoto(this,${idx})">`;
+        slot.onclick=()=>document.getElementById('finput'+idx).click();
+    }
+}
+
 function modalNuevoServicio(eid) {
     if(!sesionActual){ toast('🔑 Inicia sesion para continuar'); return; }
     const e=getEq(eid); const ent=getEntidad(e.clienteId); const hoy=new Date().toISOString().split('T')[0];
@@ -504,35 +596,100 @@ function modalNuevoServicio(eid) {
         <div class="mant-box hidden" id="mantBox"><label class="fl">📅 Proximo mantenimiento</label><input class="fi" type="date" id="proxFecha"></div>
         <div class="reparacion-box hidden" id="reparacionBox"><label class="fl">🔧 Estado posterior a la reparación</label><select class="fi" id="estadoReparacion"><option value="OPERATIVO">OPERATIVO</option><option value="FUERA DE SERVICIO">FUERA DE SERVICIO</option><option value="DAR DE BAJA">DAR DE BAJA</option></select></div>
         <label class="fl">📷 Fotos (max 3)</label><div class="foto-row">${[0,1,2].map(i=>`<div style="flex:1;"><div class="fslot" id="fslot${i}" onclick="document.getElementById('finput${i}').click()"><div class="fslot-plus">+</div><div class="fslot-lbl">Foto ${i+1}</div><input type="file" id="finput${i}" accept="image/*" style="display:none" onchange="previewFoto(this,${i})"></div></div>`).join('')}</div>
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarServicio('${eid}')">💾 Guardar</button></div>
+        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" id="btnGuardarServicio" onclick="guardarServicio('${eid}')">💾 Guardar</button></div>
     </div></div>`);
     onTipoChange();
 }
+
+// FIX: botón bloqueado durante guardado para evitar duplicados; fotos comprimidas
 async function guardarServicio(eid) {
-    const desc=document.getElementById('sDesc')?.value?.trim(); if(!desc){ toast('⚠️ Ingresa el diagnostico'); return; }
-    const tipo=document.getElementById('sTipo').value; const fecha=document.getElementById('sFecha').value;
-    const prox=tipo==='Mantenimiento'?(document.getElementById('proxFecha')?.value||null):null;
-    const estadoRep=tipo==='Reparacion'?document.getElementById('estadoReparacion')?.value:null;
-    if(tipo==='Reparacion' && !estadoRep){ toast('⚠️ Debes seleccionar el estado posterior a la reparación'); return; }
-    const fotosBase64=[]; for(let i=0;i<fotosNuevas.length;i++) if(fotosNuevas[i]) fotosBase64.push(await fileToBase64(fotosNuevas[i]));
+    const desc = document.getElementById('sDesc')?.value?.trim();
+    if(!desc){ toast('⚠️ Ingresa el diagnostico'); return; }
+    const tipo = document.getElementById('sTipo').value;
+    const fecha = document.getElementById('sFecha').value;
+    if(!fecha){ toast('⚠️ Selecciona la fecha'); return; }
+    const prox = tipo === 'Mantenimiento' ? (document.getElementById('proxFecha')?.value || null) : null;
+    const estadoRep = tipo === 'Reparacion' ? (document.getElementById('estadoReparacion')?.value || null) : null;
+
+    // Bloquear botón para evitar doble guardado
+    const btn = document.getElementById('btnGuardarServicio');
+    if(btn) { btn.disabled = true; btn.textContent = '⏳ Guardando...'; }
+
+    // FIX: comprimir fotos antes de subir
+    const fotosBase64 = [];
+    for(let i = 0; i < fotosNuevas.length; i++) {
+        if(fotosNuevas[i]) fotosBase64.push(await comprimirFoto(fotosNuevas[i]));
+    }
+
     try {
-        await addDoc(collection(db,'servicios'),{ equipoId:eid, tipo, fecha, tecnico: sesionActual?.nombre||'', descripcion:desc, proximoMantenimiento:prox, fotos:fotosBase64, estadoReparacion:estadoRep });
-        closeModal(); await cargarDatos(); const e=getEq(eid); if(e) goTo('historial',null,eid); toast('✅ Servicio guardado con '+fotosBase64.length+' foto(s)');
-    } catch(err){ toast('❌ Error: '+err.message); }
+        await addDoc(collection(db,'servicios'), {
+            equipoId: eid, tipo, fecha,
+            tecnico: sesionActual?.nombre || '',
+            descripcion: desc,
+            proximoMantenimiento: prox,
+            fotos: fotosBase64,
+            estadoReparacion: estadoRep
+        });
+        closeModal();
+        await cargarDatos();
+        goTo('historial', null, eid);
+        toast('✅ Servicio guardado con ' + fotosBase64.length + ' foto(s)');
+    } catch(err) {
+        if(btn) { btn.disabled = false; btn.textContent = '💾 Guardar'; }
+        toast('❌ Error: ' + err.message);
+    }
 }
-function modalEditarServicio(sid) { const s=servicios.find(x=>x.id===sid); if(!s) return; showModal(`<div class="modal"><div class="modal-h"><h3>Editar servicio</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-    <div class="fr"><div><label class="fl">Tipo</label><select class="fi" id="esTipo"><option ${s.tipo==='Mantenimiento'?'selected':''}>Mantenimiento</option><option ${s.tipo==='Reparacion'?'selected':''}>Reparacion</option><option ${s.tipo==='Instalacion'?'selected':''}>Instalacion</option></select></div>
-    <div><label class="fl">Fecha</label><input class="fi" type="date" id="esFecha" value="${s.fecha}"></div></div>
-    <label class="fl">Diagnostico</label><textarea class="fi" id="esDesc" rows="3">${s.descripcion}</textarea>
-    <label class="fl">Proximo mantenimiento</label><input class="fi" type="date" id="esProx" value="${s.proximoMantenimiento||''}">
-    <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarServicio('${sid}')">Guardar</button></div>
-</div></div>`); }
-async function actualizarServicio(sid) { const tipo=document.getElementById('esTipo')?.value; const fecha=document.getElementById('esFecha')?.value; const desc=document.getElementById('esDesc')?.value?.trim(); const prox=document.getElementById('esProx')?.value||null; try { await updateDoc(doc(db,'servicios',sid),{ tipo, fecha, descripcion:desc, proximoMantenimiento:prox }); closeModal(); await cargarDatos(); toast('✅ Servicio actualizado'); } catch(err){ toast('❌ Error: '+err.message); } }
-async function eliminarServicio(sid) { if(!confirm('¿Eliminar este servicio?')) return; try{ await deleteDoc(doc(db,'servicios',sid)); await cargarDatos(); toast('🗑️ Eliminado'); } catch(err){ toast('❌ Error: '+err.message); } }
+
+// FIX: modalEditarServicio ahora incluye estadoReparacion y lógica condicional
+function modalEditarServicio(sid) {
+    const s = servicios.find(x=>x.id===sid); if(!s) return;
+    showModal(`<div class="modal"><div class="modal-h"><h3>Editar servicio</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
+        <div class="fr"><div><label class="fl">Tipo</label><select class="fi" id="esTipo" onchange="onEditTipoChange()">
+            <option ${s.tipo==='Mantenimiento'?'selected':''}>Mantenimiento</option>
+            <option ${s.tipo==='Reparacion'?'selected':''}>Reparacion</option>
+            <option ${s.tipo==='Instalacion'?'selected':''}>Instalacion</option>
+        </select></div>
+        <div><label class="fl">Fecha</label><input class="fi" type="date" id="esFecha" value="${s.fecha}"></div></div>
+        <label class="fl">Diagnostico</label><textarea class="fi" id="esDesc" rows="3">${s.descripcion}</textarea>
+        <div id="esMantBox" style="${s.tipo==='Mantenimiento'?'':'display:none'}"><label class="fl">Proximo mantenimiento</label><input class="fi" type="date" id="esProx" value="${s.proximoMantenimiento||''}"></div>
+        <div id="esRepBox" style="${s.tipo==='Reparacion'?'':'display:none'}"><label class="fl">Estado posterior</label><select class="fi" id="esEstado">
+            <option value="OPERATIVO" ${s.estadoReparacion==='OPERATIVO'?'selected':''}>OPERATIVO</option>
+            <option value="FUERA DE SERVICIO" ${s.estadoReparacion==='FUERA DE SERVICIO'?'selected':''}>FUERA DE SERVICIO</option>
+            <option value="DAR DE BAJA" ${s.estadoReparacion==='DAR DE BAJA'?'selected':''}>DAR DE BAJA</option>
+        </select></div>
+        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarServicio('${sid}')">Guardar</button></div>
+    </div></div>`);
+}
+
+function onEditTipoChange() {
+    const tipo = document.getElementById('esTipo')?.value;
+    const mb = document.getElementById('esMantBox');
+    const rb = document.getElementById('esRepBox');
+    if(mb) mb.style.display = tipo === 'Mantenimiento' ? '' : 'none';
+    if(rb) rb.style.display = tipo === 'Reparacion' ? '' : 'none';
+}
+
+// FIX: actualizarServicio ahora guarda estadoReparacion y proximoMantenimiento condicional
+async function actualizarServicio(sid) {
+    const tipo = document.getElementById('esTipo')?.value;
+    const fecha = document.getElementById('esFecha')?.value;
+    const desc = document.getElementById('esDesc')?.value?.trim();
+    const prox = tipo === 'Mantenimiento' ? (document.getElementById('esProx')?.value || null) : null;
+    const estadoRep = tipo === 'Reparacion' ? (document.getElementById('esEstado')?.value || null) : null;
+    try {
+        await updateDoc(doc(db,'servicios',sid), { tipo, fecha, descripcion: desc, proximoMantenimiento: prox, estadoReparacion: estadoRep });
+        closeModal(); await cargarDatos(); toast('✅ Servicio actualizado');
+    } catch(err) { toast('❌ Error: '+err.message); }
+}
+
+async function eliminarServicio(sid) {
+    if(!confirm('¿Eliminar este servicio?')) return;
+    try { await deleteDoc(doc(db,'servicios',sid)); await cargarDatos(); toast('🗑️ Eliminado'); } catch(err) { toast('❌ Error: '+err.message); }
+}
 
 function generarInformePDF(eid) {
     const e=getEq(eid); const ent=getEntidad(e.clienteId); const ss=getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
-    const serviciosHTML=ss.map(s=>{ const fotosHTML=(s.fotos||[]).length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;">${(s.fotos||[]).map(f=>`<img src="${f}" style="height:80px;width:80px;object-fit:cover;border-radius:6px;border:1px solid #ddd;">`).join('')}</div>`:''; const proxHTML=(s.tipo==='Mantenimiento' && s.proximoMantenimiento)?`<div style="color:#b45309;font-size:16px;margin-top:4px;">&#128197; Proximo mantenimiento: ${fmtFecha(s.proximoMantenimiento)}</div>`:''; return `<div style="border:1px solid #d1d5db;border-radius:8px;padding:12px;margin-bottom:10px;page-break-inside:avoid;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><span style="background:${s.tipo==='Mantenimiento'?'#1d4ed8':s.tipo==='Reparacion'?'#dc2626':'#d10000'};color:white;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">${s.tipo}</span><span style="font-size:16px;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:16px;color:#374151;margin:3px 0;">&#128295; ${s.tecnico}</div><div style="font-size:16px;color:#111;margin:3px 0;">${s.descripcion}</div>${fotosHTML}${proxHTML}</div>`; }).join('');
+    const serviciosHTML=ss.map(s=>{ const fotosHTML=(s.fotos||[]).length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;">${(s.fotos||[]).map(f=>`<img src="${f}" style="height:80px;width:80px;object-fit:cover;border-radius:6px;border:1px solid #ddd;">`).join('')}</div>`:''; const proxHTML=(s.tipo==='Mantenimiento' && s.proximoMantenimiento)?`<div style="color:#b45309;font-size:16px;margin-top:4px;">&#128197; Proximo mantenimiento: ${fmtFecha(s.proximoMantenimiento)}</div>`:''; const estadoHTML=s.estadoReparacion?`<div style="font-size:12px;font-weight:bold;color:#d10000;margin-top:2px;">Estado: ${s.estadoReparacion}</div>`:''; return `<div style="border:1px solid #d1d5db;border-radius:8px;padding:12px;margin-bottom:10px;page-break-inside:avoid;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><span style="background:${s.tipo==='Mantenimiento'?'#1d4ed8':s.tipo==='Reparacion'?'#dc2626':'#d10000'};color:white;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">${s.tipo}</span><span style="font-size:16px;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:16px;color:#374151;margin:3px 0;">&#128295; ${s.tecnico}</div><div style="font-size:16px;color:#111;margin:3px 0;">${s.descripcion}</div>${estadoHTML}${fotosHTML}${proxHTML}</div>`; }).join('');
     const coordinador=ent?.coordinador||'No asignado'; const telefonoCoord=ent?.telefono||'Sin teléfono';
     const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Informe_${e?.marca}_${e?.modelo}</title><style>@page{size:letter;margin:15mm;}body{font-family:Arial,sans-serif;font-size:11px;color:#111;}.header{text-align:center;margin-bottom:15px;}.coordinador{font-size:14px;font-weight:bold;color:#d10000;}.titulo{font-size:18px;font-weight:bold;margin-top:5px;}</style></head><body><div class="header"><div class="coordinador">Coordinador: ${coordinador} | Tel: ${telefonoCoord}</div><div class="titulo">INFORME TECNICO</div></div><table style="width:100%;border-collapse:collapse;margin-bottom:12px;"><tr><td style="padding:6px;background:#f1f5f9;border:1px solid #ddd;"><strong>Cliente:</strong> ${ent?.nombre||'N/A'}</td><td style="padding:6px;background:#f1f5f9;border:1px solid #ddd;"><strong>Generado:</strong> ${new Date().toLocaleString()}</td></tr><tr><td colspan="2" style="padding:6px;border:1px solid #ddd;"><strong>Activo:</strong> ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} &nbsp;&nbsp; <strong>Serial:</strong> ${e?.serie||'N/A'}</td></tr></table><div style="background:#d10000;color:white;font-weight:bold;padding:6px;margin-bottom:10px;">HISTORIAL DE SERVICIOS (${ss.length})</div>${serviciosHTML}</body></html>`;
     const v=window.open('','_blank'); if(v){ v.document.open(); v.document.write(html); v.document.close(); setTimeout(()=>v.print(),500); }
@@ -546,10 +703,10 @@ function modalQR(eid) {
     setTimeout(()=>{ const qrCanvas=qrDiv.querySelector('canvas'); const qrDataUrl=qrCanvas.toDataURL('image/png'); document.body.removeChild(qrDiv); const W=400,PAD=16; const compCanvas=document.createElement('canvas'); const ctx=compCanvas.getContext('2d'); const logoImg=new Image(); const qrImg=new Image(); logoImg.crossOrigin='anonymous'; logoImg.src='https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png'; logoImg.onload=()=>{ qrImg.onload=()=>{ const logoH=50,infoH=70,qrH=280,footH=24,totalH=PAD+logoH+8+infoH+8+qrH+8+footH+PAD; compCanvas.width=W; compCanvas.height=totalH; ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,totalH); ctx.strokeStyle='#d10000'; ctx.lineWidth=3; ctx.strokeRect(2,2,W-4,totalH-4); ctx.fillStyle='#d10000'; ctx.fillRect(2,2,W-4,logoH+PAD+4); const logoW=logoImg.width*(logoH/logoImg.height); ctx.drawImage(logoImg,(W-logoW)/2,PAD,logoW,logoH); let y=PAD+logoH+8+4; ctx.fillStyle='#111'; ctx.font='bold 14px Arial'; ctx.textAlign='center'; const eqLabel=(e?.marca||'')+' '+(e?.tipo||'')+' '+(e?.modelo||''); ctx.fillText(eqLabel,W/2,y+16); ctx.font='12px Arial'; ctx.fillStyle='#444'; ctx.fillText('📍 '+(e?.ubicacion||'Sin ubicación'),W/2,y+34); ctx.fillText('👤 '+(ent?.nombre||''),W/2,y+50); if(e?.serie){ ctx.font='10px Arial'; ctx.fillStyle='#888'; ctx.fillText('Serie: '+e.serie,W/2,y+64); } y=PAD+logoH+8+4+infoH+8; ctx.drawImage(qrImg,(W-280)/2,y,280,280); y+=280+8; ctx.font='10px Arial'; ctx.fillStyle='#888'; ctx.fillText('Escanea para ver historial y contactar soporte',W/2,y+14); const compositeUrl=compCanvas.toDataURL('image/png'); showModal(`<div class="modal" style="max-width:360px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${compositeUrl}" style="width:100%;border-radius:8px;border:2px solid #d10000;"><a href="${compositeUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`); }; qrImg.src=qrDataUrl; }; logoImg.onerror=()=>{ showModal(`<div class="modal" style="max-width:340px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${qrDataUrl}" style="width:100%;"><a href="${qrDataUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`); }; },200);
 }
 
-function manejarRutaQR() { const hash=window.location.hash; if(!hash.startsWith('#/equipo/')) return false; const eid=hash.replace('#/equipo/',''); const e=getEq(eid); if(!e) return false; const ent=getEntidad(e.clienteId); const ss=getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); const main=document.getElementById('mainContent'); const topbar=document.querySelector('.topbar'); const botnav=document.querySelector('.botnav'); if(topbar) topbar.style.display='none'; if(botnav) botnav.style.display='none'; main.style.background='white'; const coordinador=ent?.coordinador||'Coordinador'; const telefono=ent?.telefono||'3239454477'; const waMsg=encodeURIComponent(`Hola ${coordinador}, necesito ayuda con el equipo ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} de la ubicación ${e?.ubicacion||'sin ubicación'}, podrías devolverme el mensaje`); const waUrl=`https://wa.me/57${telefono.replace(/\D/g,'')}?text=${waMsg}`; main.innerHTML=`<div style="max-width:600px;margin:0 auto;padding:1.5rem;"><div style="text-align:center;margin-bottom:0.75rem;"><img src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" style="height:56px;" onerror="this.style.display='none'"></div><div style="border:1px solid #ccc;border-radius:12px;padding:1rem;margin-bottom:0.75rem;"><h3 style="margin:0 0 6px;">${e.marca} ${e.tipo||''} ${e.modelo}</h3><p style="margin:2px 0;">📍 ${e.ubicacion||'Sin ubicación'}</p><p style="margin:2px 0;">👤 ${ent?.nombre||'Sin entidad'}</p><p style="margin:2px 0;font-size:0.8rem;color:#888;">Serie: ${e.serie||'N/A'}</p></div><a id="waBtn" href="${waUrl}" target="_blank" style="display:block;width:100%;box-sizing:border-box;background:#25D366;color:white;border:none;padding:14px;border-radius:12px;text-align:center;font-size:1rem;font-weight:700;text-decoration:none;margin-bottom:1rem;">📱 Contactar por WhatsApp</a><h3>Historial (${ss.length})</h3>${ss.map(s=>`<div style="border:1px solid #d1ede0;border-radius:10px;padding:0.85rem;margin-bottom:0.65rem;"><div style="display:flex;justify-content:space-between;"><strong>${s.tipo}</strong><span style="font-size:0.8rem;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:0.85rem;">🔧 ${s.tecnico}</div><div style="font-size:0.85rem;margin-top:2px;">${s.descripcion}</div>${s.proximoMantenimiento?`<div style="font-size:0.82rem;color:#b45309;margin-top:4px;">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`).join('')}</div>`; return true; }
+function manejarRutaQR() { const hash=window.location.hash; if(!hash.startsWith('#/equipo/')) return false; const eid=hash.replace('#/equipo/',''); const e=getEq(eid); if(!e) return false; const ent=getEntidad(e.clienteId); const ss=getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); const main=document.getElementById('mainContent'); const topbar=document.querySelector('.topbar'); const botnav=document.querySelector('.botnav'); if(topbar) topbar.style.display='none'; if(botnav) botnav.style.display='none'; main.style.background='white'; const coordinador=ent?.coordinador||'Coordinador'; const telefono=ent?.telefono||'3239454477'; const waMsg=encodeURIComponent(`Hola ${coordinador}, necesito ayuda con el equipo ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} de la ubicación ${e?.ubicacion||'sin ubicación'}, podrías devolverme el mensaje`); const waUrl=`https://wa.me/57${telefono.replace(/\D/g,'')}?text=${waMsg}`; main.innerHTML=`<div style="max-width:600px;margin:0 auto;padding:1.5rem;"><div style="text-align:center;margin-bottom:0.75rem;"><img src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" style="height:56px;" onerror="this.style.display='none'"></div><div style="border:1px solid #ccc;border-radius:12px;padding:1rem;margin-bottom:0.75rem;"><h3 style="margin:0 0 6px;">${e.marca} ${e.tipo||''} ${e.modelo}</h3><p style="margin:2px 0;">📍 ${e.ubicacion||'Sin ubicación'}</p><p style="margin:2px 0;">👤 ${ent?.nombre||'Sin entidad'}</p><p style="margin:2px 0;font-size:0.8rem;color:#888;">Serie: ${e.serie||'N/A'}</p></div><a id="waBtn" href="${waUrl}" target="_blank" style="display:block;width:100%;box-sizing:border-box;background:#25D366;color:white;border:none;padding:14px;border-radius:12px;text-align:center;font-size:1rem;font-weight:700;text-decoration:none;margin-bottom:1rem;">📱 Contactar por WhatsApp</a><h3>Historial (${ss.length})</h3>${ss.map(s=>`<div style="border:1px solid #d1ede0;border-radius:10px;padding:0.85rem;margin-bottom:0.65rem;"><div style="display:flex;justify-content:space-between;"><strong>${s.tipo}</strong><span style="font-size:0.8rem;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:0.85rem;">🔧 ${s.tecnico}</div><div style="font-size:0.85rem;margin-top:2px;">${s.descripcion}</div>${s.estadoReparacion?`<div style="font-size:0.82rem;color:#d10000;font-weight:700;margin-top:2px;">Estado: ${s.estadoReparacion}</div>`:''} ${s.proximoMantenimiento?`<div style="font-size:0.82rem;color:#b45309;margin-top:4px;">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`).join('')}</div>`; return true; }
 
 function renderServicios() { const años=[...new Set(servicios.map(s=>s.fecha?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a); const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return `<div class="page"><div class="sec-head"><h2>Servicios</h2></div><div class="filtros"><select class="fi" id="fAnio"><option value="">Todos los años</option>${años.map(a=>`<option>${a}</option>`).join('')}</select><select class="fi" id="fMes"><option value="">Todos los meses</option>${meses.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select><select class="fi" id="fTipo"><option value="">Todos los tipos</option><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select><select class="fi" id="fCliente"><option value="">Todos los CEDIs/Tiendas</option>${[...clientes.map(c=>`<option value="cliente|${c.id}">CEDI: ${c.nombre}</option>`), ...tiendas.map(t=>`<option value="tienda|${t.id}">TIENDA: ${t.nombre}</option>`)]}</select><select class="fi" id="fTecnico"><option value="">Todos los tecnicos</option>${tecnicos.map(t=>`<option>${t.nombre}</option>`).join('')}</select><button class="btn btn-blue btn-full" onclick="aplicarFiltros()">Aplicar</button><button class="btn btn-gray btn-full" onclick="limpiarFiltros()">Limpiar</button></div><div id="listaServicios"></div></div>`; }
-function aplicarFiltros() { const anio=document.getElementById('fAnio')?.value||''; const mes=document.getElementById('fMes')?.value||''; const tipo=document.getElementById('fTipo')?.value||''; const filtroEntidad=document.getElementById('fCliente')?.value||''; const tec=document.getElementById('fTecnico')?.value||''; let filtrados=[...servicios].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); if(anio) filtrados=filtrados.filter(s=>s.fecha?.startsWith(anio)); if(mes) filtrados=filtrados.filter(s=>s.fecha?.slice(5,7)===mes); if(tipo) filtrados=filtrados.filter(s=>s.tipo===tipo); if(filtroEntidad){ const [tipoEnt,id]=filtroEntidad.split('|'); if(tipoEnt==='cliente') filtrados=filtrados.filter(s=>getEquiposCliente(id).some(e=>e.id===s.equipoId)); else filtrados=filtrados.filter(s=>getEquiposTienda(id).some(e=>e.id===s.equipoId)); } if(tec) filtrados=filtrados.filter(s=>s.tecnico===tec); const el=document.getElementById('listaServicios'); if(!el) return; if(!filtrados.length){ el.innerHTML='<p class="cc-meta" style="text-align:center;">Sin resultados.</p>'; return; } el.innerHTML=filtrados.map(s=>{ const e=getEq(s.equipoId); const ent=getEntidad(e?.clienteId); return `<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div><div class="si-info">👤 ${ent?.nombre||'N/A'} · ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}</div><div class="si-info">📍 ${e?.ubicacion||''} · 🔧 ${s.tecnico}</div><div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`; }).join(''); }
+function aplicarFiltros() { const anio=document.getElementById('fAnio')?.value||''; const mes=document.getElementById('fMes')?.value||''; const tipo=document.getElementById('fTipo')?.value||''; const filtroEntidad=document.getElementById('fCliente')?.value||''; const tec=document.getElementById('fTecnico')?.value||''; let filtrados=[...servicios].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); if(anio) filtrados=filtrados.filter(s=>s.fecha?.startsWith(anio)); if(mes) filtrados=filtrados.filter(s=>s.fecha?.slice(5,7)===mes); if(tipo) filtrados=filtrados.filter(s=>s.tipo===tipo); if(filtroEntidad){ const [tipoEnt,id]=filtroEntidad.split('|'); if(tipoEnt==='cliente') filtrados=filtrados.filter(s=>getEquiposCliente(id).some(e=>e.id===s.equipoId)); else filtrados=filtrados.filter(s=>getEquiposTienda(id).some(e=>e.id===s.equipoId)); } if(tec) filtrados=filtrados.filter(s=>s.tecnico===tec); const el=document.getElementById('listaServicios'); if(!el) return; if(!filtrados.length){ el.innerHTML='<p class="cc-meta" style="text-align:center;">Sin resultados.</p>'; return; } el.innerHTML=filtrados.map(s=>{ const e=getEq(s.equipoId); const ent=getEntidad(e?.clienteId); return `<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div><div class="si-info">👤 ${ent?.nombre||'N/A'} · ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}</div><div class="si-info">📍 ${e?.ubicacion||''} · 🔧 ${s.tecnico}</div>${s.estadoReparacion?`<div class="si-info"><strong>Estado:</strong> ${s.estadoReparacion}</div>`:''}<div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`; }).join(''); }
 function limpiarFiltros() { ['fAnio','fMes','fTipo','fCliente','fTecnico'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; }); aplicarFiltros(); }
 function renderMantenimientos() { const MESES=['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE']; const año=new Date().getFullYear(); const mant=servicios.filter(s=>s.proximoMantenimiento); return `<div class="page"><div class="sec-head"><h2>Agenda ${año}</h2></div><div class="tbl-wrap"><table><thead><tr><th>Mes</th><th>Fecha</th><th>Cliente</th><th>Activo</th><th></th></tr></thead><tbody>${MESES.map((mes,idx)=>{ const mp=String(idx+1).padStart(2,'0'); const lista=mant.filter(m=>m.proximoMantenimiento?.startsWith(`${año}-${mp}`)); if(!lista.length) return `<tr><td style="color:var(--hint);">${mes}</td><td colspan="4" style="color:#cbd5e1;">—</td></tr>`; return lista.map((m,i)=>{ const e=getEq(m.equipoId); const ent=getEntidad(e?.clienteId); return `<tr>${i===0?`<td rowspan="${lista.length}" style="font-weight:700;background:var(--bg2);">${mes}</td>`:''}<td>${fmtFecha(m.proximoMantenimiento)}</td><td>${ent?.nombre||'N/A'}</td><td>${e?`${e.marca} ${e.tipo||''} ${e.modelo}`:'N/A'}</td><td><button class="rec-btn" onclick="modalRecordar('${e?.clienteId}','${e?.id}','${m.proximoMantenimiento}')">📱</button></td></tr>`; }).join(''); }).join('')}</tbody></table></div></div>`; }
 function obtenerGPS(latId,lngId) { if(!navigator.geolocation){ toast('⚠️ GPS no disponible'); return; } navigator.geolocation.getCurrentPosition(pos=>{ document.getElementById(latId).value=pos.coords.latitude.toFixed(6); document.getElementById(lngId).value=pos.coords.longitude.toFixed(6); toast('✅ Ubicacion capturada'); },()=>toast('⚠️ No se pudo obtener GPS')); }
@@ -562,11 +719,16 @@ function renderTecnicos() {
         ${esAdmin()?`<div style="margin-top:1.2rem;background:white;border-radius:12px;padding:0.85rem;"><div style="font-weight:700;">🏪 Subida Masiva de CEDIs y Tiendas</div><div class="ec-meta">Sube un CSV con columnas: SAP, TIENDA, CIUDAD, DEPARTAMENTO, DIRECCION, COORDINADOR, CARGO, TELEFONO</div><label class="btn btn-blue btn-sm" style="display:inline-block;margin:4px;">📥 Subir CSV<input type="file" accept=".csv" style="display:none;" onchange="subirCSVJMC(this)"></label><button class="btn btn-gray btn-sm" onclick="descargarPlantillaCSV()">📄 Plantilla</button></div>`:''}
     </div>`;
 }
+
+// FIX: abrirLogin ahora limpia mlPinActual correctamente antes de abrir el modal
 function abrirLogin(tid) {
+    mlPinActual = '';
     const t=getTec(tid);
     showModal(`<div class="modal" style="max-width:320px;"><div class="modal-h"><h3>🔑 Ingresar</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div style="font-weight:700;">${t.nombre}</div><div class="ec-meta">${t.tipoDoc}</div><label class="fl">Cedula</label><input class="fi" id="mlCedula" type="number"><label class="fl">Clave (4 digitos)</label><div class="pin-display"><div class="pin-digit" id="mlpd0"></div><div class="pin-digit" id="mlpd1"></div><div class="pin-digit" id="mlpd2"></div><div class="pin-digit" id="mlpd3"></div></div><div class="numpad">${[1,2,3,4,5,6,7,8,9].map(n=>`<div class="num-btn" onclick="mlPin('${tid}',${n})">${n}</div>`).join('')}<div class="num-btn del" onclick="mlDel()">⌫</div><div class="num-btn zero" onclick="mlPin('${tid}',0)">0</div><div class="num-btn ok" onclick="mlLogin('${tid}')">✓</div></div><div id="mlMsg"></div><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="mlLogin('${tid}')">Ingresar</button></div></div></div>`);
-    window._mlPin='';
+    // Inicializar display limpio tras render
+    setTimeout(() => mlUpdateDisplay(), 50);
 }
+
 let mlPinActual='';
 function mlPin(tid,n){ if(mlPinActual.length>=4) return; mlPinActual+=String(n); mlUpdateDisplay(); if(mlPinActual.length===4) mlLogin(tid); }
 function mlDel(){ mlPinActual=mlPinActual.slice(0,-1); mlUpdateDisplay(); }
@@ -577,12 +739,14 @@ function mlLogin(tid){
     const msg=document.getElementById('mlMsg');
     if(!cedula){ if(msg) msg.innerHTML='<div class="login-warn">⚠️ Cedula requerida</div>'; return; }
     if(mlPinActual.length<4){ if(msg) msg.innerHTML='<div class="login-warn">⚠️ Clave de 4 digitos</div>'; return; }
-    if(t.cedula!==cedula || t.clave!==mlPinActual){ if(msg) msg.innerHTML='<div class="login-error">❌ Credenciales incorrectas</div>'; mlPinActual=''; mlUpdateDisplay(); return; }
+    if(String(t.cedula)!==String(cedula) || t.clave!==mlPinActual){ if(msg) msg.innerHTML='<div class="login-error">❌ Credenciales incorrectas</div>'; mlPinActual=''; mlUpdateDisplay(); return; }
     sesionActual=t; mlPinActual=''; closeModal(); actualizarTopbar(); currentView='panel'; renderView(); toast(`✅ Bienvenido, ${t.nombre.split(' ')[0]}`);
 }
+
 function modalNuevoTecnico() {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo tecnico</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre *</label><input class="fi" id="tNombre"><div class="fr"><div><label class="fl">Tipo Doc</label><select class="fi" id="tTipoDoc">${TIPOS_DOC.map(d=>`<option>${d}</option>`).join('')}</select></div><div><label class="fl">Cedula *</label><input class="fi" id="tCedula" type="number"></div></div><label class="fl">Telefono</label><input class="fi" id="tTel"><label class="fl">Cargo</label><input class="fi" id="tCargo"><label class="fl">Rol</label><select class="fi" id="tRol"><option value="tecnico">Tecnico</option><option value="admin">Admin</option></select><label class="fl">Clave (4 digitos) *</label><input class="fi" id="tClave" type="password" maxlength="4"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarTecnico()">Guardar</button></div></div></div>`);
 }
+
 async function guardarTecnico() {
     const n=document.getElementById('tNombre')?.value?.trim(); const cc=document.getElementById('tCedula')?.value?.trim(); const cl=document.getElementById('tClave')?.value?.trim();
     if(!n||!cc||!cl){ toast('⚠️ Nombre, cedula y clave requeridos'); return; }
@@ -592,15 +756,83 @@ async function guardarTecnico() {
         closeModal(); await cargarDatos(); toast('✅ Tecnico guardado');
     } catch(err){ toast('❌ Error: '+err.message); }
 }
-function modalEditarTecnico(tid) { const t=getTec(tid); showModal(`<div class="modal"><div class="modal-h"><h3>Editar tecnico</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre</label><input class="fi" id="etNombre" value="${t.nombre}"><label class="fl">Cedula</label><input class="fi" id="etCedula" value="${t.cedula}"><label class="fl">Telefono</label><input class="fi" id="etTel" value="${t.telefono}"><label class="fl">Cargo</label><input class="fi" id="etCargo" value="${t.cargo||''}"><label class="fl">Rol</label><select class="fi" id="etRol"><option value="tecnico" ${t.rol==='tecnico'?'selected':''}>Tecnico</option><option value="admin" ${t.rol==='admin'?'selected':''}>Admin</option></select><label class="fl">Nueva clave (opcional)</label><input class="fi" id="etClave" type="password" maxlength="4"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarTecnico('${tid}')">Guardar</button></div></div></div>`); }
-async function actualizarTecnico(tid) { const data={ nombre:document.getElementById('etNombre').value, cedula:document.getElementById('etCedula').value, telefono:document.getElementById('etTel').value, cargo:document.getElementById('etCargo').value, rol:document.getElementById('etRol').value }; const newClave=document.getElementById('etClave')?.value?.trim(); if(newClave && newClave.length===4) data.clave=newClave; try { await updateDoc(doc(db,'tecnicos',tid),data); closeModal(); await cargarDatos(); toast('✅ Tecnico actualizado'); } catch(err){ toast('❌ Error: '+err.message); } }
+
+function modalEditarTecnico(tid) { const t=getTec(tid); showModal(`<div class="modal"><div class="modal-h"><h3>Editar tecnico</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre</label><input class="fi" id="etNombreTec" value="${t.nombre}"><label class="fl">Cedula</label><input class="fi" id="etCedulaTec" value="${t.cedula}"><label class="fl">Telefono</label><input class="fi" id="etTelTec" value="${t.telefono}"><label class="fl">Cargo</label><input class="fi" id="etCargoTec" value="${t.cargo||''}"><label class="fl">Rol</label><select class="fi" id="etRolTec"><option value="tecnico" ${t.rol==='tecnico'?'selected':''}>Tecnico</option><option value="admin" ${t.rol==='admin'?'selected':''}>Admin</option></select><label class="fl">Nueva clave (opcional)</label><input class="fi" id="etClaveTec" type="password" maxlength="4"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarTecnico('${tid}')">Guardar</button></div></div></div>`); }
+
+// FIX: IDs renombrados en modalEditarTecnico para evitar colisión con modalEditarCliente/Tienda (etNombre, etTel, etCargo, etRol eran compartidos)
+async function actualizarTecnico(tid) {
+    const data={
+        nombre: document.getElementById('etNombreTec').value,
+        cedula: document.getElementById('etCedulaTec').value,
+        telefono: document.getElementById('etTelTec').value,
+        cargo: document.getElementById('etCargoTec').value,
+        rol: document.getElementById('etRolTec').value
+    };
+    const newClave=document.getElementById('etClaveTec')?.value?.trim();
+    if(newClave && newClave.length===4) data.clave=newClave;
+    try { await updateDoc(doc(db,'tecnicos',tid),data); closeModal(); await cargarDatos(); toast('✅ Tecnico actualizado'); } catch(err){ toast('❌ Error: '+err.message); }
+}
+
 async function eliminarTecnico(tid) { if(!confirm('¿Eliminar este tecnico?')) return; try{ await deleteDoc(doc(db,'tecnicos',tid)); await cargarDatos(); toast('🗑️ Tecnico eliminado'); } catch(err){ toast('❌ Error: '+err.message); } }
 
-async function subirCSVJMC(input) { const file=input.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=async ev=>{ const lines=ev.target.result.split('\n').filter(l=>l.trim()); if(lines.length<2){ toast('⚠️ CSV vacío'); return; } const encabezados=lines[0].split(',').map(h=>h.trim().toUpperCase()); const idxSap=encabezados.indexOf('SAP'); const idxTienda=encabezados.indexOf('TIENDA'); const idxCiudad=encabezados.indexOf('CIUDAD'); const idxDepto=encabezados.indexOf('DEPARTAMENTO'); const idxDir=encabezados.indexOf('DIRECCION'); const idxCoord=encabezados.indexOf('COORDINADOR'); const idxCargo=encabezados.indexOf('CARGO'); const idxTel=encabezados.indexOf('TELEFONO'); if(idxSap===-1||idxTienda===-1){ toast('⚠️ El CSV debe tener columnas SAP y TIENDA'); return; } const cedis=[]; const tiendasCSV=[]; for(let i=1;i<lines.length;i++){ const cols=lines[i].split(',').map(c=>c.trim().replace(/^"|"$/g,'')); if(cols.length<Math.max(idxSap,idxTienda,idxCiudad,idxDepto,idxDir,idxCoord,idxCargo,idxTel)+1) continue; const sap=cols[idxSap]; const nombre=cols[idxTienda]; const ciudad=idxCiudad!==-1?cols[idxCiudad]:''; const departamento=idxDepto!==-1?cols[idxDepto]:''; const direccion=idxDir!==-1?cols[idxDir]:''; const coordinador=idxCoord!==-1?cols[idxCoord]:''; const cargo=idxCargo!==-1?cols[idxCargo]:''; const telefono=idxTel!==-1?cols[idxTel]:''; if(!sap||!nombre) continue; const item={sap,nombre,ciudad,departamento,direccion,coordinador,cargo,telefono,latitud:'',longitud:''}; if(nombre.toUpperCase().includes('CEDI')) cedis.push(item); else tiendasCSV.push(item); } const guardarBatch=async(items,coleccion)=>{ const batch=writeBatch(db); const colRef=collection(db,coleccion); for(const item of items){ const docRef=doc(colRef); batch.set(docRef,item); } await batch.commit(); }; if(cedis.length) await guardarBatch(cedis,'clientes'); if(tiendasCSV.length) await guardarBatch(tiendasCSV,'tiendas'); input.value=''; await cargarDatos(); toast(`✅ ${cedis.length} CEDIs y ${tiendasCSV.length} Tiendas guardadas`); }; reader.readAsText(file,'UTF-8'); }
+// FIX: subirCSVJMC ahora parsea CSV correctamente respetando campos con comas entre comillas
+async function subirCSVJMC(input) {
+    const file=input.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=async ev=>{
+        const lines=ev.target.result.split('\n').filter(l=>l.trim());
+        if(lines.length<2){ toast('⚠️ CSV vacío'); return; }
+        // Parser CSV que respeta comillas
+        function parseCSVLine(line) {
+            const result=[]; let cur=''; let inQ=false;
+            for(let i=0;i<line.length;i++){
+                const ch=line[i];
+                if(ch==='"'){ inQ=!inQ; }
+                else if(ch===',' && !inQ){ result.push(cur.trim()); cur=''; }
+                else { cur+=ch; }
+            }
+            result.push(cur.trim());
+            return result;
+        }
+        const encabezados=parseCSVLine(lines[0]).map(h=>h.replace(/^"|"$/g,'').trim().toUpperCase());
+        const idx=(col)=>encabezados.indexOf(col);
+        const iSap=idx('SAP'),iTienda=idx('TIENDA'),iCiudad=idx('CIUDAD'),iDepto=idx('DEPARTAMENTO'),iDir=idx('DIRECCION'),iCoord=idx('COORDINADOR'),iCargo=idx('CARGO'),iTel=idx('TELEFONO');
+        if(iSap===-1||iTienda===-1){ toast('⚠️ El CSV debe tener columnas SAP y TIENDA'); return; }
+        const cedis=[]; const tiendasCSV=[];
+        for(let i=1;i<lines.length;i++){
+            const cols=parseCSVLine(lines[i]).map(c=>c.replace(/^"|"$/g,''));
+            const sap=cols[iSap]?.trim(); const nombre=cols[iTienda]?.trim();
+            if(!sap||!nombre) continue;
+            const item={
+                sap, nombre,
+                ciudad: iCiudad!==-1?(cols[iCiudad]||''):'',
+                departamento: iDepto!==-1?(cols[iDepto]||''):'',
+                direccion: iDir!==-1?(cols[iDir]||''):'',
+                coordinador: iCoord!==-1?(cols[iCoord]||''):'',
+                cargo: iCargo!==-1?(cols[iCargo]||''):'',
+                telefono: iTel!==-1?(cols[iTel]||''):'',
+                latitud:'', longitud:''
+            };
+            if(nombre.toUpperCase().includes('CEDI')) cedis.push(item); else tiendasCSV.push(item);
+        }
+        const guardarBatch=async(items,coleccion)=>{
+            const batch=writeBatch(db); const colRef=collection(db,coleccion);
+            for(const item of items){ batch.set(doc(colRef),item); }
+            await batch.commit();
+        };
+        try {
+            if(cedis.length) await guardarBatch(cedis,'clientes');
+            if(tiendasCSV.length) await guardarBatch(tiendasCSV,'tiendas');
+            input.value=''; await cargarDatos(); toast(`✅ ${cedis.length} CEDIs y ${tiendasCSV.length} Tiendas guardadas`);
+        } catch(err){ toast('❌ Error CSV: '+err.message); }
+    };
+    reader.readAsText(file,'UTF-8');
+}
+
 function descargarPlantillaCSV() { const enc='SAP,TIENDA,CIUDAD,DEPARTAMENTO,DIRECCION,COORDINADOR,CARGO,TELEFONO'; const ejemplo='170,Chia - Centro - Calle 13,Chia,Cundinamarca,Calle 13 # 9-43,Edgar Amado,Coordinador Sr Mantenimiento,3107935104'; const csv=[enc,ejemplo].join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='plantilla_cedis_tiendas.csv'; a.click(); URL.revokeObjectURL(url); toast('📄 Plantilla descargada'); }
 function puedeEditar(creadoPor) { return esAdmin() || sesionActual?.nombre === creadoPor; }
 
-window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarTiendas=filtrarTiendas; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevaTienda=modalNuevaTienda; window.modalEditarTienda=modalEditarTienda; window.modalEliminarTienda=modalEliminarTienda; window.actualizarTienda=actualizarTienda; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR; window.obtenerGPS=obtenerGPS; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.subirCSVJMC=subirCSVJMC; window.descargarPlantillaCSV=descargarPlantillaCSV;
+window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarTiendas=filtrarTiendas; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevaTienda=modalNuevaTienda; window.modalEditarTienda=modalEditarTienda; window.modalEliminarTienda=modalEliminarTienda; window.actualizarTienda=actualizarTienda; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR; window.obtenerGPS=obtenerGPS; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.onEditTipoChange=onEditTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.subirCSVJMC=subirCSVJMC; window.descargarPlantillaCSV=descargarPlantillaCSV; window.guardarCliente=guardarCliente; window.guardarTienda=guardarTienda; window.guardarTecnico=guardarTecnico; window.actualizarTecnico=actualizarTecnico; window.eliminarTecnico=eliminarTecnico; window.actualizarServicio=actualizarServicio; window.guardarServicio=guardarServicio; window.actualizarEquipo=actualizarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.eliminarEquipo=eliminarEquipo; window.modalEliminarCliente=modalEliminarCliente; window.modalEliminarTienda=modalEliminarTienda;
 
 document.querySelectorAll('.bni').forEach(btn=>{ btn.addEventListener('click',()=>{ const page=btn.dataset.page; if(!sesionActual && page!=='panel' && page!=='tecnicos'){ toast('🔒 Inicia sesion desde Tecnicos'); return; } goTo(page); }); });
 
