@@ -310,7 +310,7 @@ html, body {
     margin-top: 10px;
 }
 
-/* ===== RESTO DE COMPONENTES (asegurar que todos estén presentes) ===== */
+/* ===== RESTO DE COMPONENTES ===== */
 .sec-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.7rem; }
 .sec-head h2 { font-size: 1rem; font-weight: 700; color: var(--text); }
 .search {
