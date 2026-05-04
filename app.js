@@ -1,7 +1,7 @@
 // ============================================
 // D1 SAS - APP Firebase
 // Versión definitiva: PDF a Drive + CSV persistente + Tiendas independientes
-// Código COMPLETO (sin omisiones)
+// Código COMPLETO - basado en el original con todas las funciones
 // ============================================
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, writeBatch }
@@ -24,10 +24,12 @@ const db = getFirestore(fbApp);
 
 // ===== DRIVE =====
 let _driveConnected = false;
+
 function driveIsConnected() { return _driveConnected; }
+
 async function conectarDriveAuto() {
     try {
-        await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' });
+        const response = await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' });
         _driveConnected = true;
         console.log('✅ Drive conectado automáticamente');
     } catch (e) {
@@ -35,6 +37,7 @@ async function conectarDriveAuto() {
         _driveConnected = false;
     }
 }
+
 async function driveUploadPDF(html, filename) {
     if (!filename.endsWith('.pdf')) filename = filename.replace('.html', '') + '.pdf';
     try {
@@ -95,19 +98,16 @@ function getEntidad(id) {
     return null;
 }
 
-// ===== HELPERS GENERALES =====
+// ===== HELPERS =====
 const getEq = id => equipos.find(e => e.id === id);
+const getCl = id => clientes.find(c => c.id === id);
+const getTi = id => tiendas.find(t => t.id === id);
 const getTec = id => tecnicos.find(t => t.id === id);
 const getEquiposCliente = cid => equipos.filter(e => e.clienteId === cid);
 const getEquiposTienda = tid => equipos.filter(e => e.clienteId === tid);
 const getServiciosEquipo = eid => servicios.filter(s => s.equipoId === eid);
 const getServiciosCliente = cid => servicios.filter(s => getEquiposCliente(cid).some(e => e.id === s.equipoId));
 const getServiciosTienda = tid => servicios.filter(s => getEquiposTienda(tid).some(e => e.id === s.equipoId));
-const getTiendaJMC = (sap) => jmcTiendas.find(t => t.sap === String(sap));
-function esClienteJMC(clienteId) {
-    const c = clientes.find(c => c.id === clienteId);
-    return c?.nombre === 'Jeronimo Martins Colombia';
-}
 
 function fmtFecha(f) {
     if (!f) return '';
@@ -183,7 +183,9 @@ let _servicioEidActual = null;
 const CIUDADES = ['Bogota', 'Medellin', 'Cali', 'Bucaramanga', 'Barranquilla',
     'Cucuta', 'Manizales', 'Pereira', 'Ibague', 'Villavicencio',
     'Giron', 'Floridablanca', 'Piedecuesta', 'Pamplona', 'Soacha'];
+
 const TIPOS_DOC = ['CC', 'CE', 'PA', 'NIT', 'TI'];
+
 const ESPECIALIDADES = [
     { id: 'mecanico', label: 'Mecanico de plantas' },
     { id: 'baja', label: 'Electricista baja tension' },
@@ -194,7 +196,7 @@ const ESPECIALIDADES = [
 ];
 
 // ===== NAVEGACIÓN =====
-function goTo(view, id = null, eid = null) {
+function goTo(view, id = null, eid = null, tipo = null) {
     currentView = view;
     if (view === 'detalleCliente') {
         selectedClienteId = id;
@@ -240,7 +242,7 @@ function renderView() {
     }
 }
 
-// ===== PANEL PRINCIPAL NUEVO =====
+// ===== PANEL PRINCIPAL (nuevo diseño) =====
 function renderPanel() {
     const opciones = [
         ...clientes.map(c => ({ id: c.id, nombre: c.nombre, tipo: 'cliente' })),
@@ -285,6 +287,7 @@ async function actualizarPanel(entidadId, entidadTipo) {
     for (const eq of equiposEntidad) {
         const ss = getServiciosEquipo(eq.id);
         for (const s of ss) {
+            if (!s.fecha) continue;
             const fecha = new Date(s.fecha + 'T12:00:00');
             const diffAnios = (hoy - fecha) / (1000 * 60 * 60 * 24 * 365);
             if (diffAnios <= 1) {
@@ -304,33 +307,32 @@ async function actualizarPanel(entidadId, entidadTipo) {
         <div class="panel-cell">
             <div class="panel-cell-header">ESTADO</div>
             <div class="panel-cell-content">
-                <div>OPERATIVOS: <span class="panel-number">${operativos}</span></div>
-                <div>FUERA DE SERVICIO: <span class="panel-number">${fueraServicio}</span></div>
-                <div>DAR DE BAJA: <span class="panel-number">${darBaja}</span></div>
-                <div>SIN INFORMACIÓN: <span class="panel-number">${sinInfo}</span></div>
+                <div>OPERATIVOS <span class="panel-number">${operativos}</span></div>
+                <div>FUERA DE SERVICIO <span class="panel-number">${fueraServicio}</span></div>
+                <div>DAR DE BAJA <span class="panel-number">${darBaja}</span></div>
+                <div>SIN INFORMACIÓN <span class="panel-number">${sinInfo}</span></div>
             </div>
         </div>
         <div class="panel-cell">
             <div class="panel-cell-header">SERVICIOS ANUALES</div>
             <div class="panel-cell-content">
-                <div>Mantenimiento: <span class="panel-number">${anualMant}</span></div>
-                <div>Reparación: <span class="panel-number">${anualRep}</span></div>
-                <div>Instalación: <span class="panel-number">${anualInst}</span></div>
+                <div>Mantenimiento <span class="panel-number">${anualMant}</span></div>
+                <div>Reparación <span class="panel-number">${anualRep}</span></div>
+                <div>Instalación <span class="panel-number">${anualInst}</span></div>
             </div>
         </div>
         <div class="panel-cell">
             <div class="panel-cell-header">SERVICIOS DEL MES</div>
             <div class="panel-cell-content">
-                <div>Mantenimiento: <span class="panel-number">${mensualMant}</span></div>
-                <div>Reparación: <span class="panel-number">${mensualRep}</span></div>
-                <div>Instalación: <span class="panel-number">${mensualInst}</span></div>
+                <div>Mantenimiento <span class="panel-number">${mensualMant}</span></div>
+                <div>Reparación <span class="panel-number">${mensualRep}</span></div>
+                <div>Instalación <span class="panel-number">${mensualInst}</span></div>
             </div>
         </div>
     </div>`;
     const equiposFuera = equiposEntidad.filter(eq => {
-        const ss = getServiciosEquipo(eq.id).sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
-        for (const s of ss) if (s.estadoReparacion === 'FUERA DE SERVICIO') return true;
-        return false;
+        const ss = getServiciosEquipo(eq.id);
+        return ss.some(s => s.estadoReparacion === 'FUERA DE SERVICIO');
     });
     let fueraHtml = '<div class="equipos-fuera"><h4>⚙️ Equipos FUERA DE SERVICIO</h4><div class="scroll-horizontal">';
     if (equiposFuera.length === 0) {
@@ -341,8 +343,10 @@ async function actualizarPanel(entidadId, entidadTipo) {
         }
     }
     fueraHtml += '</div></div>';
-    document.getElementById('panelStats').innerHTML = statsHtml;
-    document.getElementById('panelEquiposFuera').innerHTML = fueraHtml;
+    const statsDiv = document.getElementById('panelStats');
+    const fueraDiv = document.getElementById('panelEquiposFuera');
+    if (statsDiv) statsDiv.innerHTML = statsHtml;
+    if (fueraDiv) fueraDiv.innerHTML = fueraHtml;
 }
 
 function initPanel() {
@@ -363,7 +367,7 @@ renderPanel = function() {
     return html;
 }.bind(this);
 
-// ===== CLIENTES / CEDIs =====
+// ===== CLIENTES / CEDIs (funciones originales, completas) =====
 function renderClientes() {
     return `<div class="page">
         <div class="sec-head"><h2>CEDIs (${clientes.length})</h2><button class="btn btn-blue btn-sm" onclick="modalNuevoCliente()">+ Nuevo</button></div>
@@ -395,7 +399,7 @@ function filtrarClientes(v) {
 }
 
 function renderDetalleCliente() {
-    const c = clientes.find(x => x.id === selectedClienteId);
+    const c = getCl(selectedClienteId);
     if (!c) { goTo('clientes'); return ''; }
     const eqs = getEquiposCliente(c.id);
     return `<div class="page">
@@ -410,7 +414,7 @@ function renderDetalleCliente() {
         ${eqs.map(e => `
         <div class="ec">
             <div style="display:flex;justify-content:space-between;">
-                <div><div class="ec-name">${e.marca} ${e.tipo || ''} ${e.modelo}</div><div class="ec-meta">📍 ${e.ubicacion || 'Sin ubicación'} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>
+                <div><div class="ec-name">${e.marca} ${e.tipo || ''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion ? '📍 '+e.ubicacion : ''} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>
                 ${esAdmin() ? `<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>` : ''}
             </div>
             <div class="ec-btns">
@@ -423,7 +427,7 @@ function renderDetalleCliente() {
     </div>`;
 }
 
-// ===== TIENDAS =====
+// ===== TIENDAS (clon de CEDIs) =====
 function renderTiendas() {
     return `<div class="page">
         <div class="sec-head"><h2>Tiendas (${tiendas.length})</h2><button class="btn btn-blue btn-sm" onclick="modalNuevaTienda()">+ Nueva</button></div>
@@ -454,7 +458,7 @@ function filtrarTiendas(v) {
 }
 
 function renderDetalleTienda() {
-    const t = tiendas.find(x => x.id === selectedTiendaId);
+    const t = getTi(selectedTiendaId);
     if (!t) { goTo('tiendas'); return ''; }
     const eqs = getEquiposTienda(t.id);
     return `<div class="page">
@@ -468,7 +472,7 @@ function renderDetalleTienda() {
         ${eqs.map(e => `
         <div class="ec">
             <div style="display:flex;justify-content:space-between;">
-                <div><div class="ec-name">${e.marca} ${e.tipo || ''} ${e.modelo}</div><div class="ec-meta">📍 ${e.ubicacion || 'Sin ubicación'} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>
+                <div><div class="ec-name">${e.marca} ${e.tipo || ''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion ? '📍 '+e.ubicacion : ''} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>
                 ${esAdmin() ? `<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>` : ''}
             </div>
             <div class="ec-btns">
@@ -481,6 +485,7 @@ function renderDetalleTienda() {
     </div>`;
 }
 
+// ===== HISTORIAL =====
 function renderHistorial() {
     const e = getEq(selectedEquipoId);
     if (!e) { goTo('clientes'); return ''; }
@@ -488,7 +493,7 @@ function renderHistorial() {
     const nombreEnt = ent ? ent.nombre : 'Sin entidad';
     const ss = getServiciosEquipo(e.id).sort((a,b) => new Date(b.fecha)-new Date(a.fecha));
     return `<div class="page">
-        <div class="det-hdr"><button class="back" onclick="goTo('detalleCliente','${e.clienteId}')">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo || ''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion || 'Sin ubicación'} · ${nombreEnt}</div></div></div>
+        <div class="det-hdr"><button class="back" onclick="goTo('detalleCliente','${e.clienteId}')">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo || ''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion || ''} · ${nombreEnt}</div></div></div>
         <div style="margin-bottom:2rem;"><span style="font-weight:700;">Historial (${ss.length})</span></div>
         ${ss.map(s => `
         <div class="si">
@@ -551,7 +556,7 @@ async function guardarCliente() {
 }
 
 function modalEditarCliente(cid) {
-    const c = clientes.find(x => x.id === cid);
+    const c = getCl(cid);
     if (!c) return;
     showModal(`<div class="modal"><div class="modal-h"><h3>Editar CEDI</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <label class="fl">SAP</label><input class="fi" id="eSap" value="${c.sap || ''}">
@@ -610,7 +615,7 @@ async function eliminarCliente(cid) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== CRUD TIENDAS =====
+// ===== CRUD TIENDAS (clon exacto, sin email ni fechaCreacion) =====
 function modalNuevaTienda() {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nueva Tienda</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <label class="fl">SAP *</label><input class="fi" id="tSap">
@@ -654,7 +659,7 @@ async function guardarTienda() {
 }
 
 function modalEditarTienda(tid) {
-    const t = tiendas.find(x => x.id === tid);
+    const t = getTi(tid);
     if (!t) return;
     showModal(`<div class="modal"><div class="modal-h"><h3>Editar Tienda</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <label class="fl">SAP</label><input class="fi" id="etSap" value="${t.sap || ''}">
@@ -711,7 +716,7 @@ async function eliminarTienda(tid) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== EQUIPOS (sin campo ubicación en nuevo activo) =====
+// ===== EQUIPOS (sin campo ubicación en nuevo activo, pero se conserva el campo en edición) =====
 function modalNuevoEquipo(entidadId) {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo activo</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <div class="fr"><div><label class="fl">Marca *</label><input class="fi" id="qMarca"></div><div><label class="fl">Modelo *</label><input class="fi" id="qModelo"></div></div>
@@ -731,7 +736,7 @@ async function guardarEquipo(entidadId) {
         await addDoc(collection(db, 'equipos'), {
             clienteId: entidadId,
             marca, modelo, serie, tipo,
-            ubicacion: ''
+            ubicacion: '' // se guarda vacío pero el campo existe
         });
         closeModal();
         await cargarDatos();
@@ -776,7 +781,7 @@ async function eliminarEquipo(eid) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== SERVICIOS =====
+// ===== SERVICIOS (funciones completas) =====
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -896,7 +901,7 @@ async function eliminarServicio(sid) {
     catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== INFORME TÉCNICO PDF =====
+// ===== INFORME TÉCNICO PDF (con coordinador y teléfono, sin repetición) =====
 function generarInformePDF(eid) {
     const e = getEq(eid);
     const ent = getEntidad(e.clienteId);
@@ -918,7 +923,6 @@ function generarInformePDF(eid) {
             ${fotosHTML}${proxHTML}
         </div>`;
     }).join('');
-    const nombreTecnico = sesionActual?.nombre || 'Técnico';
     const coordinador = ent?.coordinador || 'No asignado';
     const telefonoCoord = ent?.telefono || 'Sin teléfono';
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
@@ -947,7 +951,7 @@ function generarInformePDF(eid) {
     if (v) { v.document.open(); v.document.write(html); v.document.close(); setTimeout(()=>v.print(),500); }
 }
 
-// ===== QR Y VISTA PÚBLICA (con WhatsApp al coordinador) =====
+// ===== QR y vista pública =====
 function modalQR(eid) {
     const e = getEq(eid);
     const ent = getEntidad(e.clienteId);
@@ -1063,7 +1067,7 @@ function renderTecnicos() {
             const esps = (t.especialidades||[]).map(id => ESPECIALIDADES.find(e=>e.id===id)?.label||id);
             return `<div class="ec">
                 <div style="display:flex;justify-content:space-between;">
-                    <div><div class="ec-name">${t.nombre}</div><div class="ec-meta">${t.tipoDoc}</div><div class="ec-meta">${t.cargo}</div><div class="ec-meta">📞 ${t.telefono}</div></div>
+                    <div><div class="ec-name">${t.nombre}</div><div class="ec-meta">${t.tipoDoc} ${t.cedula}</div><div class="ec-meta">${t.cargo}</div><div class="ec-meta">📞 ${t.telefono}</div></div>
                     <div><span class="tc-rol-badge ${t.rol==='admin'?'rol-admin':'rol-tec'}">${t.rol==='admin'?'Admin':'Tecnico'}</span>${esAdmin() ? `<div><button class="ib" onclick="modalEditarTecnico('${t.id}')">✏️</button><button class="ib" onclick="eliminarTecnico('${t.id}')">🗑️</button></div>` : ''}</div>
                 </div>
                 <div>${esps.map(e=>`<span class="esp-chip">${e}</span>`).join('')}</div>
@@ -1103,7 +1107,6 @@ function mlLogin(tid) {
     renderView();
     toast(`✅ Bienvenido, ${t.nombre.split(' ')[0]}`);
 }
-
 function modalNuevoTecnico() {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo tecnico</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre *</label><input class="fi" id="tNombre"><div class="fr"><div><label class="fl">Tipo Doc</label><select class="fi" id="tTipoDoc">${TIPOS_DOC.map(d=>`<option>${d}</option>`).join('')}</select></div><div><label class="fl">Cedula *</label><input class="fi" id="tCedula" type="number"></div></div><label class="fl">Telefono</label><input class="fi" id="tTel"><label class="fl">Cargo</label><input class="fi" id="tCargo"><label class="fl">Rol</label><select class="fi" id="tRol"><option value="tecnico">Tecnico</option><option value="admin">Admin</option></select><label class="fl">Clave (4 digitos) *</label><input class="fi" id="tClave" type="password" maxlength="4"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarTecnico()">Guardar</button></div></div></div>`);
 }
@@ -1154,7 +1157,7 @@ async function eliminarTecnico(tid) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== FUNCIONES RESTANTES (recordatorios, etc) =====
+// ===== RECORDATORIOS =====
 function modalRecordar(clienteId, equipoId, fecha) {
     const e = getEq(equipoId);
     const ent = getEntidad(clienteId);
@@ -1179,6 +1182,7 @@ function enviarWhatsApp(tel) {
     toast('📱 WhatsApp abierto');
 }
 
+// ===== SERVICIOS Y FILTROS (funciones completas) =====
 function renderServicios() {
     const años = [...new Set(servicios.map(s=>s.fecha?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a);
     const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -1188,7 +1192,7 @@ function renderServicios() {
             <select class="fi" id="fAnio"><option value="">Todos los años</option>${años.map(a=>`<option>${a}</option>`).join('')}</select>
             <select class="fi" id="fMes"><option value="">Todos los meses</option>${meses.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select>
             <select class="fi" id="fTipo"><option value="">Todos los tipos</option><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select>
-            <select class="fi" id="fCliente"><option value="">Todos los clientes</option>${clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select>
+            <select class="fi" id="fCliente"><option value="">Todos los CEDIs/Tiendas</option>${[...clientes.map(c=>`<option value="cliente|${c.id}">CEDI: ${c.nombre}</option>`), ...tiendas.map(t=>`<option value="tienda|${t.id}">TIENDA: ${t.nombre}</option>`)]}</select>
             <select class="fi" id="fTecnico"><option value="">Todos los tecnicos</option>${tecnicos.map(t=>`<option>${t.nombre}</option>`).join('')}</select>
             <button class="btn btn-blue btn-full" onclick="aplicarFiltros()">Aplicar</button>
             <button class="btn btn-gray btn-full" onclick="limpiarFiltros()">Limpiar</button>
@@ -1200,13 +1204,17 @@ function aplicarFiltros() {
     const anio = document.getElementById('fAnio')?.value||'';
     const mes = document.getElementById('fMes')?.value||'';
     const tipo = document.getElementById('fTipo')?.value||'';
-    const cid = document.getElementById('fCliente')?.value||'';
+    const filtroEntidad = document.getElementById('fCliente')?.value||'';
     const tec = document.getElementById('fTecnico')?.value||'';
     let filtrados = [...servicios].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
     if (anio) filtrados = filtrados.filter(s=>s.fecha?.startsWith(anio));
     if (mes) filtrados = filtrados.filter(s=>s.fecha?.slice(5,7)===mes);
     if (tipo) filtrados = filtrados.filter(s=>s.tipo===tipo);
-    if (cid) filtrados = filtrados.filter(s=>getEquiposCliente(cid).some(e=>e.id===s.equipoId));
+    if (filtroEntidad) {
+        const [tipoEnt, id] = filtroEntidad.split('|');
+        if (tipoEnt === 'cliente') filtrados = filtrados.filter(s=> getEquiposCliente(id).some(e=>e.id===s.equipoId));
+        else filtrados = filtrados.filter(s=> getEquiposTienda(id).some(e=>e.id===s.equipoId));
+    }
     if (tec) filtrados = filtrados.filter(s=>s.tecnico===tec);
     const el = document.getElementById('listaServicios');
     if (!el) return;
@@ -1382,7 +1390,7 @@ document.querySelectorAll('.bni').forEach(btn => {
     });
 });
 
-// ===== INICIAR APP (no hay sembrarDatos) =====
+// ===== INICIAR APP (sin sembrarDatos) =====
 (async () => {
     await conectarDriveAuto();
     await cargarDatos();
