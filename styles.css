@@ -223,11 +223,95 @@ html, body {
     color: white;
 }
 
-/* ===== RESTO DE COMPONENTES ===== */
-.sec-head {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 0.7rem;
+/* ===== LOGIN (teclado numérico) ===== */
+.pin-display {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin: 10px 0;
 }
+.pin-digit {
+    width: 46px;
+    height: 52px;
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--red);
+}
+.pin-digit.active {
+    border-color: var(--red);
+    border-width: 2px;
+    background: #fef2f2;
+}
+.pin-digit.filled {
+    background: var(--red);
+    color: white;
+}
+.numpad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 14px;
+}
+.num-btn {
+    background: var(--bg);
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 4px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text);
+    cursor: pointer;
+    text-align: center;
+    min-height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s;
+}
+.num-btn:active {
+    background: var(--red-light);
+}
+.num-btn.del {
+    background: #fee2e2;
+    color: var(--red);
+    font-size: 1rem;
+}
+.num-btn.ok {
+    background: var(--red-light);
+    color: var(--red);
+}
+.num-btn.zero {
+    grid-column: 2;
+}
+.login-error {
+    background: #fee2e2;
+    border: 0.5px solid #fecaca;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    color: #991b1b;
+    text-align: center;
+    margin-top: 10px;
+}
+.login-warn {
+    background: var(--gold-bg);
+    border: 0.5px solid #fde68a;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    color: #854d0e;
+    text-align: center;
+    margin-top: 10px;
+}
+
+/* ===== RESTO DE COMPONENTES (asegurar que todos estén presentes) ===== */
+.sec-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.7rem; }
 .sec-head h2 { font-size: 1rem; font-weight: 700; color: var(--text); }
 .search {
     width: 100%;

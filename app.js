@@ -1,11 +1,5 @@
-// ============================================
-// D1 SAS - APP Firebase
-// Versión definitiva: PDF a Drive + CSV persistente + Tiendas independientes
-// Código COMPLETO - basado en el original con todas las funciones
-// ============================================
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, writeBatch }
-    from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDw1faNff7uMXR6JbHOhZa7eA5WiiNAJNw",
@@ -18,26 +12,22 @@ const firebaseConfig = {
 };
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwYWgupeHfhfKmvMDk_FFsTj-P9PdJfXMn3pheGjFMXK7i43AW1V8A5BD4iCSbOho9c/exec';
-
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 
 // ===== DRIVE =====
 let _driveConnected = false;
-
 function driveIsConnected() { return _driveConnected; }
-
 async function conectarDriveAuto() {
     try {
-        const response = await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' });
+        await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' });
         _driveConnected = true;
-        console.log('✅ Drive conectado automáticamente');
-    } catch (e) {
+        console.log('✅ Drive conectado');
+    } catch(e) {
         console.log('⚠️ Drive no disponible');
         _driveConnected = false;
     }
 }
-
 async function driveUploadPDF(html, filename) {
     if (!filename.endsWith('.pdf')) filename = filename.replace('.html', '') + '.pdf';
     try {
@@ -45,22 +35,17 @@ async function driveUploadPDF(html, filename) {
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ html: html, filename: filename })
+            body: JSON.stringify({ html, filename })
         });
-        console.log('✅ PDF enviado a Drive:', filename);
         return true;
-    } catch(e) {
-        console.error('Error Drive:', e);
-        return false;
-    }
+    } catch(e) { return false; }
 }
 
 // ===== DATOS GLOBALES =====
 let clientes = [], tiendas = [], equipos = [], servicios = [], tecnicos = [];
-let jmcTiendas = [];
-let jmcTiendasVersion = '';
+let jmcTiendas = [], jmcTiendasVersion = '';
 
-// ===== CARGAR DATOS (sin sembrarDatos) =====
+// ===== CARGAR DATOS (sin sembrar) =====
 async function cargarDatos() {
     const main = document.getElementById('mainContent');
     main.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><p>Cargando...</p></div>';
@@ -79,17 +64,17 @@ async function cargarDatos() {
         servicios = ss.docs.map(d => ({ id: d.id, ...d.data() }));
         tecnicos = tecs.docs.map(d => ({ id: d.id, ...d.data() }));
         jmcTiendas = jmc.docs.map(d => ({ id: d.id, ...d.data() }));
-        if (jmcTiendas.length > 0 && jmcTiendas[0].version) jmcTiendasVersion = jmcTiendas[0].version;
-    } catch (err) {
-        console.error('Error:', err);
+        if (jmcTiendas[0]?.version) jmcTiendasVersion = jmcTiendas[0].version;
+    } catch(err) {
+        console.error(err);
         toast('⚠️ Error de conexión');
-        main.innerHTML = '<div class="page" style="text-align:center;padding:2rem;"><p>⚠️ Error al cargar datos</p><button class="btn btn-blue" onclick="location.reload()">Reintentar</button></div>';
+        main.innerHTML = '<div class="page"><p>Error</p><button class="btn btn-blue" onclick="location.reload()">Reintentar</button></div>';
         return;
     }
     renderView();
 }
 
-// ===== HELPER: obtener entidad (cliente o tienda) por ID =====
+// ===== HELPER ENTIDAD =====
 function getEntidad(id) {
     let ent = clientes.find(c => c.id === id);
     if (ent) return { ...ent, tipoEntidad: 'cliente' };
@@ -98,7 +83,7 @@ function getEntidad(id) {
     return null;
 }
 
-// ===== HELPERS =====
+// ===== HELPERS GENERALES =====
 const getEq = id => equipos.find(e => e.id === id);
 const getCl = id => clientes.find(c => c.id === id);
 const getTi = id => tiendas.find(t => t.id === id);
@@ -109,33 +94,26 @@ const getServiciosEquipo = eid => servicios.filter(s => s.equipoId === eid);
 const getServiciosCliente = cid => servicios.filter(s => getEquiposCliente(cid).some(e => e.id === s.equipoId));
 const getServiciosTienda = tid => servicios.filter(s => getEquiposTienda(tid).some(e => e.id === s.equipoId));
 
-function fmtFecha(f) {
-    if (!f) return '';
-    return new Date(f + 'T12:00:00').toLocaleDateString('es-ES');
-}
-function fmtFechaLarga(f) {
-    if (!f) return '';
-    return new Date(f + 'T12:00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
-}
-function getMesActual() { return new Date().toISOString().slice(0, 7); }
+function fmtFecha(f) { if (!f) return ''; return new Date(f + 'T12:00:00').toLocaleDateString('es-ES'); }
+function fmtFechaLarga(f) { if (!f) return ''; return new Date(f + 'T12:00:00').toLocaleDateString('es-ES', { day:'numeric', month:'long', year:'numeric' }); }
+function getMesActual() { return new Date().toISOString().slice(0,7); }
 
 function esAdmin() { return sesionActual?.rol === 'admin'; }
 function esPropietario(creadoPor) { return sesionActual?.nombre === creadoPor; }
 function puedeEditar(creadoPor) { return esAdmin() || esPropietario(creadoPor); }
 
-function toast(msg, duration = 3000) {
+function toast(msg, duration=3000) {
     const t = document.getElementById('toastEl');
     t.textContent = msg;
     t.classList.add('show');
     clearTimeout(t._timer);
     t._timer = setTimeout(() => t.classList.remove('show'), duration);
 }
-
 function showModal(html) {
     const ov = document.getElementById('overlayEl');
     ov.innerHTML = html;
     ov.classList.remove('hidden');
-    ov.onclick = e => { if (e.target === ov) closeModal(); };
+    ov.onclick = e => { if(e.target === ov) closeModal(); };
 }
 function closeModal() {
     const ov = document.getElementById('overlayEl');
@@ -143,7 +121,6 @@ function closeModal() {
     ov.innerHTML = '';
     fotosNuevas = [null, null, null];
 }
-
 function actualizarTopbar() {
     const right = document.getElementById('topbarRight');
     if (!right) return;
@@ -163,7 +140,6 @@ function actualizarTopbar() {
             </div>`;
     }
 }
-
 function cerrarSesion() {
     sesionActual = null;
     actualizarTopbar();
@@ -171,32 +147,26 @@ function cerrarSesion() {
     toast('👋 Sesion cerrada');
 }
 
-// ===== ESTADO =====
+// ===== ESTADO GLOBAL =====
 let currentView = 'panel';
 let sesionActual = null;
-let selectedClienteId = null;
-let selectedTiendaId = null;
-let selectedEquipoId = null;
+let selectedClienteId = null, selectedTiendaId = null, selectedEquipoId = null;
 let fotosNuevas = [null, null, null];
 let _servicioEidActual = null;
 
-const CIUDADES = ['Bogota', 'Medellin', 'Cali', 'Bucaramanga', 'Barranquilla',
-    'Cucuta', 'Manizales', 'Pereira', 'Ibague', 'Villavicencio',
-    'Giron', 'Floridablanca', 'Piedecuesta', 'Pamplona', 'Soacha'];
-
-const TIPOS_DOC = ['CC', 'CE', 'PA', 'NIT', 'TI'];
-
+const CIUDADES = ['Bogota','Medellin','Cali','Bucaramanga','Barranquilla','Cucuta','Manizales','Pereira','Ibague','Villavicencio','Giron','Floridablanca','Piedecuesta','Pamplona','Soacha'];
+const TIPOS_DOC = ['CC','CE','PA','NIT','TI'];
 const ESPECIALIDADES = [
-    { id: 'mecanico', label: 'Mecanico de plantas' },
-    { id: 'baja', label: 'Electricista baja tension' },
-    { id: 'media', label: 'Electricista media tension' },
-    { id: 'electronico', label: 'Electronico' },
-    { id: 'ups', label: 'UPS' },
-    { id: 'planta', label: 'Plantas electricas' }
+    { id:'mecanico', label:'Mecanico de plantas' },
+    { id:'baja', label:'Electricista baja tension' },
+    { id:'media', label:'Electricista media tension' },
+    { id:'electronico', label:'Electronico' },
+    { id:'ups', label:'UPS' },
+    { id:'planta', label:'Plantas electricas' }
 ];
 
 // ===== NAVEGACIÓN =====
-function goTo(view, id = null, eid = null, tipo = null) {
+function goTo(view, id=null, eid=null) {
     currentView = view;
     if (view === 'detalleCliente') {
         selectedClienteId = id;
@@ -220,25 +190,21 @@ function goTo(view, id = null, eid = null, tipo = null) {
             (view === 'historial' && (b.dataset.page === 'clientes' || b.dataset.page === 'tiendas')));
     });
 }
-
 function renderView() {
-    if (!sesionActual && currentView !== 'panel' && currentView !== 'tecnicos') {
-        currentView = 'panel';
-    }
+    if (!sesionActual && currentView !== 'panel' && currentView !== 'tecnicos') currentView = 'panel';
     const main = document.getElementById('mainContent');
     document.getElementById('botnavEl').style.display = 'flex';
-
-    switch (currentView) {
-        case 'panel':         main.innerHTML = renderPanel(); break;
-        case 'clientes':      main.innerHTML = renderClientes(); break;
-        case 'tiendas':       main.innerHTML = renderTiendas(); break;
+    switch(currentView) {
+        case 'panel': main.innerHTML = renderPanel(); break;
+        case 'clientes': main.innerHTML = renderClientes(); break;
+        case 'tiendas': main.innerHTML = renderTiendas(); break;
         case 'detalleCliente': main.innerHTML = renderDetalleCliente(); break;
-        case 'detalleTienda':  main.innerHTML = renderDetalleTienda(); break;
-        case 'historial':     main.innerHTML = renderHistorial(); break;
-        case 'servicios':     main.innerHTML = renderServicios(); if(window.aplicarFiltros) aplicarFiltros(); break;
-        case 'mantenimientos':main.innerHTML = renderMantenimientos(); break;
-        case 'tecnicos':      main.innerHTML = renderTecnicos(); break;
-        default:              main.innerHTML = renderPanel();
+        case 'detalleTienda': main.innerHTML = renderDetalleTienda(); break;
+        case 'historial': main.innerHTML = renderHistorial(); break;
+        case 'servicios': main.innerHTML = renderServicios(); if(window.aplicarFiltros) aplicarFiltros(); break;
+        case 'mantenimientos': main.innerHTML = renderMantenimientos(); break;
+        case 'tecnicos': main.innerHTML = renderTecnicos(); break;
+        default: main.innerHTML = renderPanel();
     }
 }
 
@@ -248,54 +214,37 @@ function renderPanel() {
         ...clientes.map(c => ({ id: c.id, nombre: c.nombre, tipo: 'cliente' })),
         ...tiendas.map(t => ({ id: t.id, nombre: t.nombre, tipo: 'tienda' }))
     ];
-    if (opciones.length === 0) {
-        return `<div class="page"><div class="panel-banner">No hay CEDIs ni Tiendas registradas.</div></div>`;
-    }
+    if (opciones.length === 0) return '<div class="page"><div class="panel-banner">No hay CEDIs ni Tiendas registradas.</div></div>';
     return `<div class="page" id="panelContainer">
-        <div class="selector-panel">
-            <select id="panelSelector" class="fi">
-                ${opciones.map(opt => `<option value="${opt.tipo}|${opt.id}">${opt.tipo === 'cliente' ? 'CEDI: ' : 'TIENDA: '}${opt.nombre}</option>`).join('')}
-            </select>
-        </div>
+        <div class="selector-panel"><select id="panelSelector" class="fi">${opciones.map(opt => `<option value="${opt.tipo}|${opt.id}">${opt.tipo === 'cliente' ? 'CEDI: ' : 'TIENDA: '}${opt.nombre}</option>`).join('')}</select></div>
         <div id="panelStats"></div>
         <div id="panelEquiposFuera"></div>
     </div>`;
 }
-
 async function actualizarPanel(entidadId, entidadTipo) {
     const equiposEntidad = equipos.filter(e => e.clienteId === entidadId);
     let operativos = 0, fueraServicio = 0, darBaja = 0, sinInfo = 0;
     for (const eq of equiposEntidad) {
         const ss = getServiciosEquipo(eq.id).sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
         let ultimoEstado = null;
-        for (const s of ss) {
-            if (s.estadoReparacion) {
-                ultimoEstado = s.estadoReparacion;
-                break;
-            }
-        }
+        for (const s of ss) if (s.estadoReparacion) { ultimoEstado = s.estadoReparacion; break; }
         if (ultimoEstado === 'OPERATIVO') operativos++;
         else if (ultimoEstado === 'FUERA DE SERVICIO') fueraServicio++;
         else if (ultimoEstado === 'DAR DE BAJA') darBaja++;
         else sinInfo++;
     }
-    const hoy = new Date();
-    const anioActual = hoy.getFullYear();
-    const mesActual = hoy.getMonth() + 1;
-    let anualMant = 0, anualRep = 0, anualInst = 0;
-    let mensualMant = 0, mensualRep = 0, mensualInst = 0;
+    const hoy = new Date(), anioActual = hoy.getFullYear(), mesActual = hoy.getMonth()+1;
+    let anualMant=0, anualRep=0, anualInst=0, mensualMant=0, mensualRep=0, mensualInst=0;
     for (const eq of equiposEntidad) {
-        const ss = getServiciosEquipo(eq.id);
-        for (const s of ss) {
+        for (const s of getServiciosEquipo(eq.id)) {
             if (!s.fecha) continue;
             const fecha = new Date(s.fecha + 'T12:00:00');
-            const diffAnios = (hoy - fecha) / (1000 * 60 * 60 * 24 * 365);
-            if (diffAnios <= 1) {
+            if ((hoy - fecha) / (1000*60*60*24*365) <= 1) {
                 if (s.tipo === 'Mantenimiento') anualMant++;
                 else if (s.tipo === 'Reparacion') anualRep++;
                 else if (s.tipo === 'Instalacion') anualInst++;
             }
-            if (fecha.getFullYear() === anioActual && (fecha.getMonth() + 1) === mesActual) {
+            if (fecha.getFullYear() === anioActual && (fecha.getMonth()+1) === mesActual) {
                 if (s.tipo === 'Mantenimiento') mensualMant++;
                 else if (s.tipo === 'Reparacion') mensualRep++;
                 else if (s.tipo === 'Instalacion') mensualInst++;
@@ -304,51 +253,33 @@ async function actualizarPanel(entidadId, entidadTipo) {
     }
     const statsHtml = `
     <div class="panel-grid-3col">
-        <div class="panel-cell">
-            <div class="panel-cell-header">ESTADO</div>
-            <div class="panel-cell-content">
-                <div>OPERATIVOS <span class="panel-number">${operativos}</span></div>
-                <div>FUERA DE SERVICIO <span class="panel-number">${fueraServicio}</span></div>
-                <div>DAR DE BAJA <span class="panel-number">${darBaja}</span></div>
-                <div>SIN INFORMACIÓN <span class="panel-number">${sinInfo}</span></div>
-            </div>
-        </div>
-        <div class="panel-cell">
-            <div class="panel-cell-header">SERVICIOS ANUALES</div>
-            <div class="panel-cell-content">
-                <div>Mantenimiento <span class="panel-number">${anualMant}</span></div>
-                <div>Reparación <span class="panel-number">${anualRep}</span></div>
-                <div>Instalación <span class="panel-number">${anualInst}</span></div>
-            </div>
-        </div>
-        <div class="panel-cell">
-            <div class="panel-cell-header">SERVICIOS DEL MES</div>
-            <div class="panel-cell-content">
-                <div>Mantenimiento <span class="panel-number">${mensualMant}</span></div>
-                <div>Reparación <span class="panel-number">${mensualRep}</span></div>
-                <div>Instalación <span class="panel-number">${mensualInst}</span></div>
-            </div>
-        </div>
+        <div class="panel-cell"><div class="panel-cell-header">ESTADO</div><div class="panel-cell-content">
+            <div>OPERATIVOS <span class="panel-number">${operativos}</span></div>
+            <div>FUERA DE SERVICIO <span class="panel-number">${fueraServicio}</span></div>
+            <div>DAR DE BAJA <span class="panel-number">${darBaja}</span></div>
+            <div>SIN INFORMACIÓN <span class="panel-number">${sinInfo}</span></div>
+        </div></div>
+        <div class="panel-cell"><div class="panel-cell-header">SERVICIOS ANUALES</div><div class="panel-cell-content">
+            <div>Mantenimiento <span class="panel-number">${anualMant}</span></div>
+            <div>Reparación <span class="panel-number">${anualRep}</span></div>
+            <div>Instalación <span class="panel-number">${anualInst}</span></div>
+        </div></div>
+        <div class="panel-cell"><div class="panel-cell-header">SERVICIOS DEL MES</div><div class="panel-cell-content">
+            <div>Mantenimiento <span class="panel-number">${mensualMant}</span></div>
+            <div>Reparación <span class="panel-number">${mensualRep}</span></div>
+            <div>Instalación <span class="panel-number">${mensualInst}</span></div>
+        </div></div>
     </div>`;
-    const equiposFuera = equiposEntidad.filter(eq => {
-        const ss = getServiciosEquipo(eq.id);
-        return ss.some(s => s.estadoReparacion === 'FUERA DE SERVICIO');
-    });
+    const equiposFuera = equiposEntidad.filter(eq => getServiciosEquipo(eq.id).some(s => s.estadoReparacion === 'FUERA DE SERVICIO'));
     let fueraHtml = '<div class="equipos-fuera"><h4>⚙️ Equipos FUERA DE SERVICIO</h4><div class="scroll-horizontal">';
-    if (equiposFuera.length === 0) {
-        fueraHtml += '<span style="font-size:0.75rem; color:var(--hint);">No hay equipos en este estado.</span>';
-    } else {
-        for (const eq of equiposFuera) {
-            fueraHtml += `<div class="equipo-card" onclick="goTo('historial', null, '${eq.id}')">${eq.marca} ${eq.tipo || ''} ${eq.modelo}</div>`;
-        }
-    }
+    if (!equiposFuera.length) fueraHtml += '<span style="font-size:0.75rem;color:var(--hint);">No hay equipos en este estado.</span>';
+    else for (const eq of equiposFuera) fueraHtml += `<div class="equipo-card" onclick="goTo('historial', null, '${eq.id}')">${eq.marca} ${eq.tipo||''} ${eq.modelo}</div>`;
     fueraHtml += '</div></div>';
     const statsDiv = document.getElementById('panelStats');
     const fueraDiv = document.getElementById('panelEquiposFuera');
     if (statsDiv) statsDiv.innerHTML = statsHtml;
     if (fueraDiv) fueraDiv.innerHTML = fueraHtml;
 }
-
 function initPanel() {
     const selector = document.getElementById('panelSelector');
     if (!selector) return;
@@ -359,15 +290,15 @@ function initPanel() {
         actualizarPanel(newId, newTipo);
     });
 }
-// Asegurar que después de renderizar el panel se ejecute initPanel
+// Monkey patch para que panel se inicialice después del render
 const originalRenderPanel = renderPanel;
-renderPanel = function() {
+window.renderPanel = function() {
     const html = originalRenderPanel();
-    setTimeout(() => { if (document.getElementById('panelSelector')) initPanel(); }, 100);
+    setTimeout(() => { if (document.getElementById('panelSelector')) initPanel(); }, 150);
     return html;
-}.bind(this);
+};
 
-// ===== CLIENTES / CEDIs (funciones originales, completas) =====
+// ===== CLIENTES / CEDIs =====
 function renderClientes() {
     return `<div class="page">
         <div class="sec-head"><h2>CEDIs (${clientes.length})</h2><button class="btn btn-blue btn-sm" onclick="modalNuevoCliente()">+ Nuevo</button></div>
@@ -390,14 +321,12 @@ function renderClientes() {
         </div>
     </div>`;
 }
-
 function filtrarClientes(v) {
     const txt = v.toLowerCase();
     document.querySelectorAll('#clientesGrid .cc').forEach(c => {
         c.style.display = (c.dataset.search||'').includes(txt) ? '' : 'none';
     });
 }
-
 function renderDetalleCliente() {
     const c = getCl(selectedClienteId);
     if (!c) { goTo('clientes'); return ''; }
@@ -427,7 +356,7 @@ function renderDetalleCliente() {
     </div>`;
 }
 
-// ===== TIENDAS (clon de CEDIs) =====
+// ===== TIENDAS =====
 function renderTiendas() {
     return `<div class="page">
         <div class="sec-head"><h2>Tiendas (${tiendas.length})</h2><button class="btn btn-blue btn-sm" onclick="modalNuevaTienda()">+ Nueva</button></div>
@@ -449,14 +378,12 @@ function renderTiendas() {
         </div>
     </div>`;
 }
-
 function filtrarTiendas(v) {
     const txt = v.toLowerCase();
     document.querySelectorAll('#tiendasGrid .cc').forEach(c => {
         c.style.display = (c.dataset.search||'').includes(txt) ? '' : 'none';
     });
 }
-
 function renderDetalleTienda() {
     const t = getTi(selectedTiendaId);
     if (!t) { goTo('tiendas'); return ''; }
@@ -485,7 +412,6 @@ function renderDetalleTienda() {
     </div>`;
 }
 
-// ===== HISTORIAL =====
 function renderHistorial() {
     const e = getEq(selectedEquipoId);
     if (!e) { goTo('clientes'); return ''; }
@@ -509,25 +435,11 @@ function renderHistorial() {
         </div>`).join('')}
     </div>`;
 }
+// ============================================================================
+// CONTINUACIÓN DE app.js - PARTE 2 (funciones de clientes, tiendas, equipos, servicios, etc.)
+// ============================================================================
 
-// ===== CRUD CLIENTES (CEDIs) =====
-function modalNuevoCliente() {
-    showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo CEDI</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <label class="fl">SAP *</label><input class="fi" id="cSap">
-        <label class="fl">Nombre *</label><input class="fi" id="cNombre">
-        <div class="fr"><div><label class="fl">Ciudad *</label><select class="fi" id="cCiudad">${CIUDADES.map(ci=>`<option>${ci}</option>`).join('')}</select></div>
-        <div><label class="fl">Departamento</label><input class="fi" id="cDepartamento"></div></div>
-        <label class="fl">Dirección *</label><input class="fi" id="cDir">
-        <label class="fl">Coordinador *</label><input class="fi" id="cCoordinador">
-        <label class="fl">Cargo *</label><input class="fi" id="cCargo">
-        <label class="fl">Teléfono *</label><input class="fi" id="cTel" type="tel">
-        <label class="fl">Email (opcional)</label><input class="fi" id="cEmail">
-        <button class="btn btn-blue btn-full" onclick="obtenerGPS('cLat','cLng')">📍 Compartir ubicación</button>
-        <input type="hidden" id="cLat"><input type="hidden" id="cLng">
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarCliente()">Guardar</button></div>
-    </div></div>`);
-}
-
+// ===== CLIENTES / CEDIs =====
 async function guardarCliente() {
     const sap = document.getElementById('cSap')?.value?.trim();
     const nombre = document.getElementById('cNombre')?.value?.trim();
@@ -556,7 +468,7 @@ async function guardarCliente() {
 }
 
 function modalEditarCliente(cid) {
-    const c = getCl(cid);
+    const c = clientes.find(x => x.id === cid);
     if (!c) return;
     showModal(`<div class="modal"><div class="modal-h"><h3>Editar CEDI</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <label class="fl">SAP</label><input class="fi" id="eSap" value="${c.sap || ''}">
@@ -615,7 +527,7 @@ async function eliminarCliente(cid) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== CRUD TIENDAS (clon exacto, sin email ni fechaCreacion) =====
+// ===== TIENDAS (clon) =====
 function modalNuevaTienda() {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nueva Tienda</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <label class="fl">SAP *</label><input class="fi" id="tSap">
@@ -659,7 +571,7 @@ async function guardarTienda() {
 }
 
 function modalEditarTienda(tid) {
-    const t = getTi(tid);
+    const t = tiendas.find(x => x.id === tid);
     if (!t) return;
     showModal(`<div class="modal"><div class="modal-h"><h3>Editar Tienda</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <label class="fl">SAP</label><input class="fi" id="etSap" value="${t.sap || ''}">
@@ -716,7 +628,7 @@ async function eliminarTienda(tid) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== EQUIPOS (sin campo ubicación en nuevo activo, pero se conserva el campo en edición) =====
+// ===== EQUIPOS =====
 function modalNuevoEquipo(entidadId) {
     showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo activo</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
         <div class="fr"><div><label class="fl">Marca *</label><input class="fi" id="qMarca"></div><div><label class="fl">Modelo *</label><input class="fi" id="qModelo"></div></div>
@@ -736,7 +648,7 @@ async function guardarEquipo(entidadId) {
         await addDoc(collection(db, 'equipos'), {
             clienteId: entidadId,
             marca, modelo, serie, tipo,
-            ubicacion: '' // se guarda vacío pero el campo existe
+            ubicacion: ''
         });
         closeModal();
         await cargarDatos();
@@ -781,7 +693,7 @@ async function eliminarEquipo(eid) {
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== SERVICIOS (funciones completas) =====
+// ===== SERVICIOS =====
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -901,7 +813,7 @@ async function eliminarServicio(sid) {
     catch(err) { toast('❌ Error: ' + err.message); }
 }
 
-// ===== INFORME TÉCNICO PDF (con coordinador y teléfono, sin repetición) =====
+// ===== INFORME PDF =====
 function generarInformePDF(eid) {
     const e = getEq(eid);
     const ent = getEntidad(e.clienteId);
@@ -1182,7 +1094,7 @@ function enviarWhatsApp(tel) {
     toast('📱 WhatsApp abierto');
 }
 
-// ===== SERVICIOS Y FILTROS (funciones completas) =====
+// ===== SERVICIOS Y FILTROS =====
 function renderServicios() {
     const años = [...new Set(servicios.map(s=>s.fecha?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a);
     const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -1274,6 +1186,8 @@ function obtenerGPS(latId, lngId) {
         toast('✅ Ubicacion capturada');
     }, () => toast('⚠️ No se pudo obtener GPS'));
 }
+
+// ===== CSV =====
 async function subirCSVJMC(input) {
     const file = input.files[0];
     if (!file) return;
@@ -1352,9 +1266,11 @@ window.limpiarFiltros = limpiarFiltros;
 window.modalNuevoCliente = modalNuevoCliente;
 window.modalEditarCliente = modalEditarCliente;
 window.modalEliminarCliente = modalEliminarCliente;
+window.actualizarCliente = actualizarCliente;
 window.modalNuevaTienda = modalNuevaTienda;
 window.modalEditarTienda = modalEditarTienda;
 window.modalEliminarTienda = modalEliminarTienda;
+window.actualizarTienda = actualizarTienda;
 window.modalNuevoEquipo = modalNuevoEquipo;
 window.modalEditarEquipo = modalEditarEquipo;
 window.modalEliminarEquipo = modalEliminarEquipo;
