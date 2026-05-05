@@ -228,20 +228,20 @@ async function actualizarPanel(entidadId, entidadTipo) {
     }
     const statsHtml = `<div class="panel-grid-3col">
         <div class="panel-cell"><div class="panel-cell-header">ESTADO</div><div class="panel-cell-content">
-            <div>OPERATIVOS <span class="panel-number">${operativos}</span></div>
-            <div>FUERA DE SERVICIO <span class="panel-number">${fueraServicio}</span></div>
-            <div>DAR DE BAJA <span class="panel-number">${darBaja}</span></div>
-            <div>SIN INFORMACIÓN <span class="panel-number">${sinInfo}</span></div>
+            <div><span class="pc-lbl">Operativos</span><span class="panel-number pn-green">${operativos}</span></div>
+            <div><span class="pc-lbl">Fuera serv.</span><span class="panel-number pn-yellow">${fueraServicio}</span></div>
+            <div><span class="pc-lbl">Dar de baja</span><span class="panel-number pn-red">${darBaja}</span></div>
+            <div><span class="pc-lbl">Sin info</span><span class="panel-number pn-gray">${sinInfo}</span></div>
         </div></div>
-        <div class="panel-cell"><div class="panel-cell-header">SERVICIOS ANUALES</div><div class="panel-cell-content">
-            <div>Mantenimiento <span class="panel-number">${anualMant}</span></div>
-            <div>Reparación <span class="panel-number">${anualRep}</span></div>
-            <div>Instalación <span class="panel-number">${anualInst}</span></div>
+        <div class="panel-cell"><div class="panel-cell-header">SERV. ANUAL</div><div class="panel-cell-content">
+            <div><span class="pc-lbl">Mantenim.</span><span class="panel-number">${anualMant}</span></div>
+            <div><span class="pc-lbl">Reparación</span><span class="panel-number">${anualRep}</span></div>
+            <div><span class="pc-lbl">Instalación</span><span class="panel-number">${anualInst}</span></div>
         </div></div>
-        <div class="panel-cell"><div class="panel-cell-header">SERVICIOS DEL MES</div><div class="panel-cell-content">
-            <div>Mantenimiento <span class="panel-number">${mensualMant}</span></div>
-            <div>Reparación <span class="panel-number">${mensualRep}</span></div>
-            <div>Instalación <span class="panel-number">${mensualInst}</span></div>
+        <div class="panel-cell"><div class="panel-cell-header">SERV. MES</div><div class="panel-cell-content">
+            <div><span class="pc-lbl">Mantenim.</span><span class="panel-number">${mensualMant}</span></div>
+            <div><span class="pc-lbl">Reparación</span><span class="panel-number">${mensualRep}</span></div>
+            <div><span class="pc-lbl">Instalación</span><span class="panel-number">${mensualInst}</span></div>
         </div></div>
     </div>`;
 
