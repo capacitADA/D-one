@@ -27,7 +27,7 @@ async function driveUploadPDF(html, filename) {
     catch(e) { return false; }
 }
 
-let clientes = [], tiendas = [], equipos = [], servicios = [], tecnicos = [];
+let clientes = [], tiendas = [], equipos = [], servicios = [], tecnicos = [], cotizaciones = [];
 let jmcTiendas = [], jmcTiendasVersion = '';
 
 async function cargarDatos() {
@@ -35,13 +35,14 @@ async function cargarDatos() {
     if (!main) return;
     main.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><p>Cargando...</p></div>';
     try {
-        const [cs, ts, es, ss, tecs, jmc] = await Promise.all([
+        const [cs, ts, es, ss, tecs, jmc, cots] = await Promise.all([
             getDocs(query(collection(db,'clientes'), orderBy('nombre'))),
             getDocs(query(collection(db,'tiendas'), orderBy('nombre'))),
             getDocs(collection(db,'equipos')),
             getDocs(query(collection(db,'servicios'), orderBy('fecha','desc'))),
             getDocs(collection(db,'tecnicos')),
-            getDocs(collection(db,'jmc_tiendas'))
+            getDocs(collection(db,'jmc_tiendas')),
+            getDocs(collection(db,'cotizaciones'))
         ]);
         clientes = cs.docs.map(d => ({ id:d.id, ...d.data() }));
         tiendas = ts.docs.map(d => ({ id:d.id, ...d.data() }));
@@ -49,6 +50,7 @@ async function cargarDatos() {
         servicios = ss.docs.map(d => ({ id:d.id, ...d.data() }));
         tecnicos = tecs.docs.map(d => ({ id:d.id, ...d.data() }));
         jmcTiendas = jmc.docs.map(d => ({ id:d.id, ...d.data() }));
+        cotizaciones = cots.docs.map(d => ({ id:d.id, ...d.data() }));
         if(jmcTiendas[0]?.version) jmcTiendasVersion = jmcTiendas[0].version;
     } catch(err) {
         console.error(err);
@@ -69,11 +71,30 @@ function getEntidad(id) {
 
 const getEq = id => equipos.find(e => e.id === id);
 const getTec = id => tecnicos.find(t => t.id === id);
-const getEquiposCliente = cid => equipos.filter(e => e.clienteId === cid);
-const getEquiposTienda = tid => equipos.filter(e => e.clienteId === tid);
+const ordenarEquipos = arr => [...arr].sort((a,b) =>
+    (a.marca||'').localeCompare(b.marca||'') ||
+    (a.tipo||'').localeCompare(b.tipo||'') ||
+    (a.modelo||'').localeCompare(b.modelo||'')
+);
+const getEquiposCliente = cid => ordenarEquipos(equipos.filter(e => e.clienteId === cid));
+const getEquiposTienda = tid => ordenarEquipos(equipos.filter(e => e.clienteId === tid));
 const getServiciosEquipo = eid => servicios.filter(s => s.equipoId === eid);
 const getServiciosCliente = cid => servicios.filter(s => getEquiposCliente(cid).some(e => e.id === s.equipoId));
 const getServiciosTienda = tid => servicios.filter(s => getEquiposTienda(tid).some(e => e.id === s.equipoId));
+
+// ===== COTIZACIONES =====
+const ESTADO_PRIORIDAD = { con_oc: 0, subida: 1, instalado: 2, abierta: 3 };
+const ESTADO_LABEL = { abierta: 'Abierta', subida: 'Subida', con_oc: 'Sin entregar', instalado: 'Repuestos instalados' };
+const ESTADO_BADGE = { abierta: 'b-gray', subida: 'b-blue', con_oc: 'b-amber', instalado: 'b-success' };
+const ESTADO_SIGUIENTE = { abierta: 'subida', subida: 'con_oc', con_oc: 'instalado' };
+const getCotizacionesEquipo = eid => [...cotizaciones.filter(c => c.equipoId === eid)].sort((a,b) => {
+    const p = (ESTADO_PRIORIDAD[a.estado]??9) - (ESTADO_PRIORIDAD[b.estado]??9);
+    if (p !== 0) return p;
+    return (b.fechaRecibida||'').localeCompare(a.fechaRecibida||'');
+});
+const getCotizacionesCliente = cid => cotizaciones.filter(c => getEquiposCliente(cid).some(e => e.id === c.equipoId));
+const getCotizacionesTienda = tid => cotizaciones.filter(c => getEquiposTienda(tid).some(e => e.id === c.equipoId));
+function diasSinEntregar(fechaOC) { if(!fechaOC) return 0; return Math.max(0, Math.floor((Date.now() - new Date(fechaOC+'T00:00:00').getTime()) / 86400000)); }
 const getTiendaJMC = (sap) => jmcTiendas.find(t => t.sap === String(sap));
 function esClienteJMC(clienteId) {
     const c = clientes.find(c => c.id === clienteId);
@@ -336,9 +357,9 @@ function renderDetalleCliente() {
     return `<div class="page"><div class="det-hdr"><button class="back" onclick="goTo('clientes')">← Volver</button><div><div class="cc-name">${c.nombre}</div><div class="cc-meta">${c.ciudad}</div></div></div>
         <div class="info-box"><div class="cc-row">📞 <strong>${c.telefono}</strong></div>${c.email?`<div class="cc-row">📧 ${c.email}</div>`:''}
         <div class="cc-row">📍 ${c.direccion}</div>${c.latitud?`<a class="map-link" href="https://maps.google.com/?q=${c.latitud},${c.longitud}" target="_blank">🗺️ Ver en Google Maps</a>`:'<div class="cc-meta">Sin GPS</div>'}</div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:0.65rem;"><span style="font-weight:700;">Activos (${eqs.length})</span><button class="btn btn-blue btn-sm" onclick="modalNuevoEquipo('${c.id}')">+ Activo</button></div>
-        ${eqs.map(e=>`<div class="ec"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion?'📍 '+e.ubicacion:''} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>${esAdmin()?`<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>`:''}</div>
-        <div class="ec-btns"><button class="ab" onclick="goTo('historial','${c.id}','${e.id}')">📋 Servicios</button><button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button><button class="ab" onclick="generarInformePDF('${e.id}')">📄 PDF</button><button class="ab" onclick="modalQR('${e.id}')">📱 QR</button></div></div>`).join('')}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;gap:6px;"><span style="font-weight:700;">Activos (${eqs.length})</span><div style="display:flex;gap:6px;"><button class="btn btn-gray btn-sm" onclick="exportarCotizacionesEntidad('${c.id}')">📊 Cotizaciones</button><button class="btn btn-blue btn-sm" onclick="modalNuevoEquipo('${c.id}')">+ Activo</button></div></div>
+        ${eqs.map(e=>`<div class="ec"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s) · ${getCotizacionesEquipo(e.id).length} cotización(es)</div></div>${esAdmin()?`<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>`:''}</div>
+        <div class="ec-btns"><button class="ab" onclick="goTo('historial','${c.id}','${e.id}')">📋 Servicios</button><button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button><button class="ab" onclick="modalCotizaciones('${e.id}')">💰 Cotizaciones</button><button class="ab" onclick="modalQR('${e.id}')">📱 QR</button></div></div>`).join('')}
     </div>`;
 }
 
@@ -438,9 +459,9 @@ function renderDetalleTienda() {
     const eqs = getEquiposTienda(t.id);
     return `<div class="page"><div class="det-hdr"><button class="back" onclick="goTo('tiendas')">← Volver</button><div><div class="cc-name">${t.nombre}</div><div class="cc-meta">${t.ciudad}</div></div></div>
         <div class="info-box"><div class="cc-row">📞 <strong>${t.telefono}</strong></div><div class="cc-row">📍 ${t.direccion}</div>${t.latitud?`<a class="map-link" href="https://maps.google.com/?q=${t.latitud},${t.longitud}" target="_blank">🗺️ Ver en Google Maps</a>`:'<div class="cc-meta">Sin GPS</div>'}</div>
-        <div style="display:flex;justify-content:space-between;margin-bottom:0.65rem;"><span style="font-weight:700;">Activos (${eqs.length})</span><button class="btn btn-blue btn-sm" onclick="modalNuevoEquipo('${t.id}')">+ Activo</button></div>
-        ${eqs.map(e=>`<div class="ec"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion?'📍 '+e.ubicacion:''} · Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s)</div></div>${esAdmin()?`<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>`:''}</div>
-        <div class="ec-btns"><button class="ab" onclick="goTo('historial','${t.id}','${e.id}')">📋 Servicios</button><button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button><button class="ab" onclick="generarInformePDF('${e.id}')">📄 PDF</button><button class="ab" onclick="modalQR('${e.id}')">📱 QR</button></div></div>`).join('')}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;gap:6px;"><span style="font-weight:700;">Activos (${eqs.length})</span><div style="display:flex;gap:6px;"><button class="btn btn-gray btn-sm" onclick="exportarCotizacionesEntidad('${t.id}')">📊 Cotizaciones</button><button class="btn btn-blue btn-sm" onclick="modalNuevoEquipo('${t.id}')">+ Activo</button></div></div>
+        ${eqs.map(e=>`<div class="ec"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s) · ${getCotizacionesEquipo(e.id).length} cotización(es)</div></div>${esAdmin()?`<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>`:''}</div>
+        <div class="ec-btns"><button class="ab" onclick="goTo('historial','${t.id}','${e.id}')">📋 Servicios</button><button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button><button class="ab" onclick="modalCotizaciones('${e.id}')">💰 Cotizaciones</button><button class="ab" onclick="modalQR('${e.id}')">📱 QR</button></div></div>`).join('')}
     </div>`;
 }
 
@@ -533,7 +554,7 @@ async function guardarEquipo(entidadId) {
     const serie = document.getElementById('qSerie')?.value || '';
     const tipo = document.getElementById('qTipo')?.value || '';
     try {
-        await addDoc(collection(db, 'equipos'), { clienteId: entidadId, marca, modelo, serie, tipo, ubicacion: '' });
+        await addDoc(collection(db, 'equipos'), { clienteId: entidadId, marca, modelo, serie, tipo });
         closeModal(); await cargarDatos(); toast('✅ Activo guardado');
     } catch(err) { toast('❌ Error: ' + err.message); }
 }
@@ -566,6 +587,121 @@ async function eliminarEquipo(eid) {
     try { for(const s of ss) await deleteDoc(doc(db,'servicios',s.id)); await deleteDoc(doc(db,'equipos',eid)); await cargarDatos(); toast('🗑️ Activo eliminado'); } catch(err) { toast('❌ Error: '+err.message); }
 }
 
+// ===== MODULO COTIZACIONES =====
+function modalCotizaciones(eid) {
+    const e = getEq(eid); if(!e) return;
+    const cots = getCotizacionesEquipo(eid);
+    showModal(`<div class="modal modal-wide"><div class="modal-h"><h3>Cotizaciones - ${e.marca} ${e.modelo}</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
+        ${cots.length ? cots.map(c => `<div class="si" style="cursor:pointer;" onclick="modalEditarCotizacion('${c.id}')">
+            <div class="si-top"><span style="font-weight:700;">${c.numero ? 'Cot. '+c.numero : 'Sin número'}</span><span class="badge ${ESTADO_BADGE[c.estado]||'b-gray'}">${ESTADO_LABEL[c.estado]||c.estado}</span></div>
+            <div class="si-info">${c.proveedor||''} · ${c.descripcion||''}</div>
+            <div class="si-info">$${Number(c.monto||0).toLocaleString('es-CO')} (sin IVA)</div>
+            <div class="si-info" style="color:var(--hint);">${c.estado==='con_oc' ? `OC: ${fmtFecha(c.fechaOC)} · ${diasSinEntregar(c.fechaOC)} día(s) esperando` : ''}${c.estado==='subida' ? `Subida: ${fmtFecha(c.fechaSubida)}` : ''}${c.estado==='instalado' ? `Instalado: ${fmtFecha(c.fechaInstalado)}` : ''}${c.estado==='abierta' ? `Recibida: ${fmtFecha(c.fechaRecibida)}` : ''}</div>
+        </div>`).join('') : '<p class="cc-meta" style="text-align:center;color:var(--hint);">Sin cotizaciones registradas.</p>'}
+        <div class="modal-foot" style="justify-content:center;"><button class="btn btn-blue btn-full" onclick="modalNuevaCotizacion('${eid}')">+ Nueva cotización</button></div>
+    </div></div>`);
+}
+
+function modalNuevaCotizacion(eid) {
+    showModal(`<div class="modal"><div class="modal-h"><h3>Nueva cotización</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
+        <label class="fl">Proveedor *</label><input class="fi" id="qcProveedor">
+        <label class="fl">N° de cotización</label><input class="fi" id="qcNumero">
+        <label class="fl">Descripción *</label><input class="fi" id="qcDescripcion">
+        <div class="fr"><div><label class="fl">Monto (sin IVA) *</label><input class="fi" id="qcMonto" type="number"></div>
+        <div><label class="fl">Fecha recibida *</label><input class="fi" id="qcFechaRecibida" type="date"></div></div>
+        <div class="modal-foot"><button class="btn btn-gray" onclick="modalCotizaciones('${eid}')">Cancelar</button><button class="btn btn-blue" onclick="guardarCotizacion('${eid}')">Guardar</button></div>
+    </div></div>`);
+}
+
+async function guardarCotizacion(eid) {
+    const proveedor = document.getElementById('qcProveedor')?.value?.trim();
+    const numero = document.getElementById('qcNumero')?.value?.trim() || '';
+    const descripcion = document.getElementById('qcDescripcion')?.value?.trim();
+    const monto = document.getElementById('qcMonto')?.value;
+    const fechaRecibida = document.getElementById('qcFechaRecibida')?.value;
+    if(!proveedor || !descripcion || !monto || !fechaRecibida) { toast('⚠️ Complete los campos obligatorios'); return; }
+    try {
+        await addDoc(collection(db,'cotizaciones'), { equipoId: eid, proveedor, numero, descripcion, monto: Number(monto), fechaRecibida, estado: 'abierta' });
+        await cargarDatos(); modalCotizaciones(eid); toast('✅ Cotización guardada');
+    } catch(err) { toast('❌ Error: '+err.message); }
+}
+
+function modalEditarCotizacion(qid) {
+    const c = cotizaciones.find(x => x.id === qid); if(!c) return;
+    const siguiente = ESTADO_SIGUIENTE[c.estado];
+    const fechasHtml = `
+        ${c.fechaRecibida ? `<div class="cc-row">Recibida: ${fmtFecha(c.fechaRecibida)}</div>` : ''}
+        ${c.fechaSubida ? `<div class="cc-row">Subida: ${fmtFecha(c.fechaSubida)}</div>` : ''}
+        ${c.fechaOC ? `<div class="cc-row">Orden de compra: ${fmtFecha(c.fechaOC)}</div>` : ''}
+        ${c.fechaInstalado ? `<div class="cc-row">Instalado: ${fmtFecha(c.fechaInstalado)}</div>` : ''}`;
+    const avanceHtml = siguiente ? `
+        <label class="fl">${siguiente==='instalado' ? 'Marcar como instalado' : 'Fecha de '+(siguiente==='subida'?'subida':'orden de compra')}</label>
+        ${siguiente!=='instalado' ? `<input class="fi" id="qcFechaAvance" type="date">` : ''}
+        <button class="btn btn-blue btn-full" style="margin-top:0.5rem;" onclick="avanzarEstadoCotizacion('${c.id}')">Avanzar a: ${ESTADO_LABEL[siguiente]}</button>` : '';
+    showModal(`<div class="modal"><div class="modal-h"><h3>${c.numero ? 'Cotización '+c.numero : 'Cotización'}</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
+        <div class="cc-name">${c.proveedor}</div>
+        <div class="cc-row">${c.descripcion}</div>
+        <div class="cc-row">$${Number(c.monto||0).toLocaleString('es-CO')} (sin IVA)</div>
+        <span class="badge ${ESTADO_BADGE[c.estado]||'b-gray'}" style="margin:0.5rem 0;display:inline-block;">${ESTADO_LABEL[c.estado]||c.estado}</span>
+        ${fechasHtml}
+        <div style="margin-top:0.75rem;">${avanceHtml}</div>
+        <div class="modal-foot">${esAdmin()?`<button class="btn btn-red" onclick="eliminarCotizacion('${c.id}')">Eliminar</button>`:''}<button class="btn btn-gray" onclick="modalCotizaciones('${c.equipoId}')">Volver</button></div>
+    </div></div>`);
+}
+
+async function avanzarEstadoCotizacion(qid) {
+    const c = cotizaciones.find(x => x.id === qid); if(!c) return;
+    const siguiente = ESTADO_SIGUIENTE[c.estado]; if(!siguiente) return;
+    const data = { estado: siguiente };
+    if (siguiente !== 'instalado') {
+        const fecha = document.getElementById('qcFechaAvance')?.value;
+        if(!fecha) { toast('⚠️ Ingrese la fecha'); return; }
+        if (siguiente === 'subida') data.fechaSubida = fecha;
+        if (siguiente === 'con_oc') data.fechaOC = fecha;
+    } else {
+        data.fechaInstalado = new Date().toISOString().slice(0,10);
+    }
+    try { await updateDoc(doc(db,'cotizaciones',qid), data); await cargarDatos(); modalEditarCotizacion(qid); toast('✅ Estado actualizado'); }
+    catch(err) { toast('❌ Error: '+err.message); }
+}
+
+async function eliminarCotizacion(qid) {
+    if(!confirm('¿Eliminar esta cotización?')) return;
+    const c = cotizaciones.find(x => x.id === qid); const eid = c?.equipoId;
+    try { await deleteDoc(doc(db,'cotizaciones',qid)); await cargarDatos(); if(eid) modalCotizaciones(eid); toast('🗑️ Cotización eliminada'); }
+    catch(err) { toast('❌ Error: '+err.message); }
+}
+
+function exportarCotizacionesEntidad(entidadId) {
+    const ent = getEntidad(entidadId); if(!ent) return;
+    const cots = ent.tipoEntidad === 'tienda' ? getCotizacionesTienda(entidadId) : getCotizacionesCliente(entidadId);
+    if(!cots.length){ toast('⚠️ Sin cotizaciones para exportar'); return; }
+    const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
+    const header = ['CEDI/Tienda','Activo','Marca','Modelo','Serie','N Cotizacion','Proveedor','Descripcion','Monto sin IVA','Estado','Fecha Recibida','Fecha Subida','Fecha OC','Fecha Instalado','Dias sin entregar'];
+    const rows = cots.map(c => {
+        const e = getEq(c.equipoId);
+        return [
+            ent.nombre||'',
+            `${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}`.trim(),
+            e?.marca||'', e?.modelo||'', e?.serie||'',
+            c.numero||'', c.proveedor||'', c.descripcion||'', c.monto||0,
+            ESTADO_LABEL[c.estado]||c.estado,
+            c.fechaRecibida?fmtFecha(c.fechaRecibida):'',
+            c.fechaSubida?fmtFecha(c.fechaSubida):'',
+            c.fechaOC?fmtFecha(c.fechaOC):'',
+            c.fechaInstalado?fmtFecha(c.fechaInstalado):'',
+            c.estado==='con_oc'?diasSinEntregar(c.fechaOC):''
+        ].map(esc).join(',');
+    });
+    const csv = '\uFEFF' + [header.map(esc).join(','), ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `Cotizaciones_${ent.nombre}_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+    URL.revokeObjectURL(url);
+    toast('📊 Excel descargado');
+}
+
 // FIX: font-size de fecha corregido de 2rem a 0.82rem
 function renderHistorial() {
     const e = getEq(selectedEquipoId); if(!e) { goTo('clientes'); return ''; }
@@ -573,10 +709,10 @@ function renderHistorial() {
     const ss = getServiciosEquipo(e.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
     // Volver al detalle correcto según tipo de entidad
     const backTarget = ent?.tipoEntidad === 'tienda' ? `goTo('detalleTienda','${e.clienteId}')` : `goTo('detalleCliente','${e.clienteId}')`;
-    return `<div class="page"><div class="det-hdr"><button class="back" onclick="${backTarget}">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${e.ubicacion||''} · ${nombreEnt}</div></div></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;">
+    return `<div class="page"><div class="det-hdr"><button class="back" onclick="${backTarget}">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${nombreEnt}</div></div></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;gap:6px;">
             <span style="font-weight:700;">Historial (${ss.length})</span>
-            <button class="btn btn-gray btn-sm" onclick="exportarHistorialExcel('${e.id}')">📊 Excel</button>
+            <div style="display:flex;gap:6px;"><button class="btn btn-gray btn-sm" onclick="generarInformePDF('${e.id}')">📄 PDF</button><button class="btn btn-gray btn-sm" onclick="exportarHistorialExcel('${e.id}')">📊 Excel</button></div>
         </div>
         ${ss.map(s=>`<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span style="font-size:0.82rem;color:var(--hint);">${fmtFecha(s.fecha)}</span></div><div class="si-info">🔧 ${s.tecnico}</div>${s.estadoReparacion?`<div class="si-info"><strong>Estado:</strong> ${s.estadoReparacion}</div>`:''}<div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}<div class="fotos-strip">${(s.fotos||[]).map(f=>`<img class="fthumb" src="${f}" loading="lazy">`).join('')}</div><div class="si-top" style="justify-content:flex-end;margin-top:4px;">${puedeEditar(s.tecnico)?`<button class="ib" onclick="modalEditarServicio('${s.id}')">✏️</button>`:''}${esAdmin()?`<button class="ib" onclick="eliminarServicio('${s.id}')">🗑️</button>`:''}</div></div>`).join('')}
     </div>`;
@@ -589,7 +725,7 @@ function exportarHistorialExcel(eid) {
     const ss = getServiciosEquipo(eid).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
     if(!ss.length){ toast('⚠️ Sin servicios para exportar'); return; }
     const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
-    const header = ['Fecha','Tipo','Tecnico','Estado','Descripcion','Proximo Mantenimiento','CEDI/Tienda','Activo','Marca','Modelo','Serie','Ubicacion'];
+    const header = ['Fecha','Tipo','Tecnico','Estado','Descripcion','Proximo Mantenimiento','CEDI/Tienda','Activo','Marca','Modelo','Serie'];
     const rows = ss.map(s => [
         fmtFecha(s.fecha),
         s.tipo||'',
@@ -601,8 +737,7 @@ function exportarHistorialExcel(eid) {
         `${e.marca} ${e.tipo||''} ${e.modelo}`.trim(),
         e.marca||'',
         e.modelo||'',
-        e.serie||'',
-        e.ubicacion||''
+        e.serie||''
     ].map(esc).join(','));
     const csv = '\uFEFF' + [header.map(esc).join(','), ...rows].join('\r\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -849,7 +984,7 @@ function modalQR(eid) {
     },200);
 }
 
-function manejarRutaQR() { const hash=window.location.hash; if(!hash.startsWith('#/equipo/')) return false; const eid=hash.replace('#/equipo/',''); const e=getEq(eid); if(!e) return false; const ent=getEntidad(e.clienteId); const ss=getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); const main=document.getElementById('mainContent'); const topbar=document.querySelector('.topbar'); const botnav=document.querySelector('.botnav'); if(topbar) topbar.style.display='none'; if(botnav) botnav.style.display='none'; main.style.background='white'; const coordinador=ent?.coordinador||'Coordinador'; const telefono=ent?.telefono||'3239454477'; const waMsg=encodeURIComponent(`Hola ${coordinador}, necesito ayuda con el equipo ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} de la ubicación ${e?.ubicacion||'sin ubicación'}, podrías devolverme el mensaje`); const waUrl=`https://wa.me/57${telefono.replace(/\D/g,'')}?text=${waMsg}`; main.innerHTML=`<div style="max-width:600px;margin:0 auto;padding:1.5rem;"><div style="text-align:center;margin-bottom:0.75rem;"><img src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" style="height:56px;" onerror="this.style.display='none'"></div><div style="border:1px solid #ccc;border-radius:12px;padding:1rem;margin-bottom:0.75rem;"><h3 style="margin:0 0 6px;">${e.marca} ${e.tipo||''} ${e.modelo}</h3><p style="margin:2px 0;">📍 ${e.ubicacion||'Sin ubicación'}</p><p style="margin:2px 0;">👤 ${ent?.nombre||'Sin entidad'}</p><p style="margin:2px 0;font-size:0.8rem;color:#888;">Serie: ${e.serie||'N/A'}</p></div><a id="waBtn" href="${waUrl}" target="_blank" style="display:block;width:100%;box-sizing:border-box;background:#25D366;color:white;border:none;padding:14px;border-radius:12px;text-align:center;font-size:1rem;font-weight:700;text-decoration:none;margin-bottom:1rem;">📱 Contactar por WhatsApp</a><h3>Historial (${ss.length})</h3>${ss.map(s=>`<div style="border:1px solid #d1ede0;border-radius:10px;padding:0.85rem;margin-bottom:0.65rem;"><div style="display:flex;justify-content:space-between;"><strong>${s.tipo}</strong><span style="font-size:0.8rem;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:0.85rem;">🔧 ${s.tecnico}</div><div style="font-size:0.85rem;margin-top:2px;">${s.descripcion}</div>${s.estadoReparacion?`<div style="font-size:0.82rem;color:#d10000;font-weight:700;margin-top:2px;">Estado: ${s.estadoReparacion}</div>`:''} ${s.proximoMantenimiento?`<div style="font-size:0.82rem;color:#b45309;margin-top:4px;">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`).join('')}</div>`; return true; }
+function manejarRutaQR() { const hash=window.location.hash; if(!hash.startsWith('#/equipo/')) return false; const eid=hash.replace('#/equipo/',''); const e=getEq(eid); if(!e) return false; const ent=getEntidad(e.clienteId); const ss=getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); const main=document.getElementById('mainContent'); const topbar=document.querySelector('.topbar'); const botnav=document.querySelector('.botnav'); if(topbar) topbar.style.display='none'; if(botnav) botnav.style.display='none'; main.style.background='white'; const coordinador=ent?.coordinador||'Coordinador'; const telefono=ent?.telefono||'3239454477'; const waMsg=encodeURIComponent(`Hola ${coordinador}, necesito ayuda con el equipo ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} del ${ent?.nombre||'CEDI/Tienda'}, podrías devolverme el mensaje`); const waUrl=`https://wa.me/57${telefono.replace(/\D/g,'')}?text=${waMsg}`; main.innerHTML=`<div style="max-width:600px;margin:0 auto;padding:1.5rem;"><div style="text-align:center;margin-bottom:0.75rem;"><img src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" style="height:56px;" onerror="this.style.display='none'"></div><div style="border:1px solid #ccc;border-radius:12px;padding:1rem;margin-bottom:0.75rem;"><h3 style="margin:0 0 6px;">${e.marca} ${e.tipo||''} ${e.modelo}</h3><p style="margin:2px 0;">👤 ${ent?.nombre||'Sin entidad'}</p><p style="margin:2px 0;font-size:0.8rem;color:#888;">Serie: ${e.serie||'N/A'}</p></div><a id="waBtn" href="${waUrl}" target="_blank" style="display:block;width:100%;box-sizing:border-box;background:#25D366;color:white;border:none;padding:14px;border-radius:12px;text-align:center;font-size:1rem;font-weight:700;text-decoration:none;margin-bottom:1rem;">📱 Contactar por WhatsApp</a><h3>Historial (${ss.length})</h3>${ss.map(s=>`<div style="border:1px solid #d1ede0;border-radius:10px;padding:0.85rem;margin-bottom:0.65rem;"><div style="display:flex;justify-content:space-between;"><strong>${s.tipo}</strong><span style="font-size:0.8rem;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:0.85rem;">🔧 ${s.tecnico}</div><div style="font-size:0.85rem;margin-top:2px;">${s.descripcion}</div>${s.estadoReparacion?`<div style="font-size:0.82rem;color:#d10000;font-weight:700;margin-top:2px;">Estado: ${s.estadoReparacion}</div>`:''} ${s.proximoMantenimiento?`<div style="font-size:0.82rem;color:#b45309;margin-top:4px;">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`).join('')}</div>`; return true; }
 
 function renderServicios() { const años=[...new Set(servicios.map(s=>s.fecha?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a); const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return `<div class="page"><div class="sec-head"><h2>Servicios</h2></div><div class="filtros"><select class="fi" id="fAnio"><option value="">Todos los años</option>${años.map(a=>`<option>${a}</option>`).join('')}</select><select class="fi" id="fMes"><option value="">Todos los meses</option>${meses.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select><select class="fi" id="fTipo"><option value="">Todos los tipos</option><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select><select class="fi" id="fCliente"><option value="">Todos los CEDIs/Tiendas</option>${[...clientes.map(c=>`<option value="cliente|${c.id}">CEDI: ${c.nombre}</option>`), ...tiendas.map(t=>`<option value="tienda|${t.id}">TIENDA: ${t.nombre}</option>`)]}</select><select class="fi" id="fTecnico"><option value="">Todos los tecnicos</option>${tecnicos.map(t=>`<option>${t.nombre}</option>`).join('')}</select><button class="btn btn-blue btn-full" onclick="aplicarFiltros()">Aplicar</button><button class="btn btn-gray btn-full" onclick="limpiarFiltros()">Limpiar</button></div><div id="listaServicios"></div></div>`; }
 function aplicarFiltros() { const anio=document.getElementById('fAnio')?.value||''; const mes=document.getElementById('fMes')?.value||''; const tipo=document.getElementById('fTipo')?.value||''; const filtroEntidad=document.getElementById('fCliente')?.value||''; const tec=document.getElementById('fTecnico')?.value||''; let filtrados=[...servicios].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); if(anio) filtrados=filtrados.filter(s=>s.fecha?.startsWith(anio)); if(mes) filtrados=filtrados.filter(s=>s.fecha?.slice(5,7)===mes); if(tipo) filtrados=filtrados.filter(s=>s.tipo===tipo); if(filtroEntidad){ const [tipoEnt,id]=filtroEntidad.split('|'); if(tipoEnt==='cliente') filtrados=filtrados.filter(s=>getEquiposCliente(id).some(e=>e.id===s.equipoId)); else filtrados=filtrados.filter(s=>getEquiposTienda(id).some(e=>e.id===s.equipoId)); } if(tec) filtrados=filtrados.filter(s=>s.tecnico===tec); const el=document.getElementById('listaServicios'); if(!el) return; if(!filtrados.length){ el.innerHTML='<p class="cc-meta" style="text-align:center;">Sin resultados.</p>'; return; } el.innerHTML=filtrados.map(s=>{ const e=getEq(s.equipoId); const ent=getEntidad(e?.clienteId); return `<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div><div class="si-info">👤 ${ent?.nombre||'N/A'} · ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}</div><div class="si-info">📍 ${e?.ubicacion||''} · 🔧 ${s.tecnico}</div>${s.estadoReparacion?`<div class="si-info"><strong>Estado:</strong> ${s.estadoReparacion}</div>`:''}<div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`; }).join(''); }
@@ -979,6 +1114,7 @@ function descargarPlantillaCSV() { const enc='SAP,TIENDA,CIUDAD,DEPARTAMENTO,DIR
 function puedeEditar(creadoPor) { return esAdmin() || sesionActual?.nombre === creadoPor; }
 
 window.exportarHistorialEntidad=exportarHistorialEntidad; window.exportarHistorialExcel=exportarHistorialExcel; window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarTiendas=filtrarTiendas; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevaTienda=modalNuevaTienda; window.modalEditarTienda=modalEditarTienda; window.modalEliminarTienda=modalEliminarTienda; window.actualizarTienda=actualizarTienda; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR; window.obtenerGPS=obtenerGPS; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.onEditTipoChange=onEditTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.subirCSVJMC=subirCSVJMC; window.descargarPlantillaCSV=descargarPlantillaCSV; window.guardarCliente=guardarCliente; window.guardarTienda=guardarTienda; window.guardarTecnico=guardarTecnico; window.actualizarTecnico=actualizarTecnico; window.eliminarTecnico=eliminarTecnico; window.actualizarServicio=actualizarServicio; window.guardarServicio=guardarServicio; window.actualizarEquipo=actualizarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.eliminarEquipo=eliminarEquipo; window.modalEliminarCliente=modalEliminarCliente; window.modalEliminarTienda=modalEliminarTienda;
+window.modalCotizaciones=modalCotizaciones; window.modalNuevaCotizacion=modalNuevaCotizacion; window.guardarCotizacion=guardarCotizacion; window.modalEditarCotizacion=modalEditarCotizacion; window.avanzarEstadoCotizacion=avanzarEstadoCotizacion; window.eliminarCotizacion=eliminarCotizacion; window.exportarCotizacionesEntidad=exportarCotizacionesEntidad;
 
 document.querySelectorAll('.bni').forEach(btn=>{ btn.addEventListener('click',()=>{ const page=btn.dataset.page; if(!sesionActual && page!=='panel' && page!=='tecnicos'){ toast('🔒 Inicia sesion desde Tecnicos'); return; } goTo(page); }); });
 
