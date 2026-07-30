@@ -1,1121 +1,2054 @@
+// ============================================
+// JD Arquisoluciones S.A.S - APP Firebase
+// Versión: D1 SAS + JMC + RO + QR + Informes
+// Última actualización: Mayo 2026
+// ============================================
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, orderBy, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import {
+    getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc,
+    query, orderBy, writeBatch, runTransaction, getDoc
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDw1faNff7uMXR6JbHOhZa7eA5WiiNAJNw",
-  authDomain: "donecapacitada-4fa37.firebaseapp.com",
-  databaseURL: "https://donecapacitada-4fa37-default-rtdb.firebaseio.com",
-  projectId: "donecapacitada-4fa37",
-  storageBucket: "donecapacitada-4fa37.firebasestorage.app",
-  messagingSenderId: "449540711283",
-  appId: "1:449540711283:web:01efe4696daafc4e215b06"
+    apiKey: "AIzaSyBf8Zu84MPTjx60MsFstL6esFgYEpVurxA",
+    authDomain: "jdarq-65151.firebaseapp.com",
+    projectId: "jdarq-65151",
+    storageBucket: "jdarq-65151.firebasestorage.app",
+    messagingSenderId: "332208097404",
+    appId: "1:332208097404:web:d51faaaa80c9bc5afc1dc2"
 };
 
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwYWgupeHfhfKmvMDk_FFsTj-P9PdJfXMn3pheGjFMXK7i43AW1V8A5BD4iCSbOho9c/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw5OJtITMcidLT8KO1T13fnEslWygu9b2rBJmGSMjPP0IpMQtxheC4O3XSHOaduSUg33Q/exec';
+
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
 
+// ============================================
+// VARIABLES GLOBALES
+// ============================================
+let clientes = [], equipos = [], servicios = [], tecnicos = [], tiendas = [];
+let jmcTiendas = [], d1Tiendas = [];
+let currentView = 'panel';
+let sesionActual = null;
+let selectedClienteId = null;
+let selectedTiendaId = null;
+let selectedEquipoId = null;
+let fotosNuevas = [null, null, null];
+let fotosD1 = [null, null];
+let d1FirmaDataUrl = '';
+let _servicioEidActual = null;
+let _jmcHtmlUltimo = null;
+let _jmcTicketUltimo = '';
+let _jmcRepuestosUltimo = '';
+
+const CIUDADES = ['Bogota','Medellin','Cali','Bucaramanga','Barranquilla','Cucuta','Manizales','Pereira','Ibague','Villavicencio','Giron','Floridablanca','Piedecuesta','Pamplona','Soacha'];
+const TIPOS_DOC = ['CC','CE','PA','NIT','TI'];
+const ESPECIALIDADES = [
+    { id: 'mecanico', label: 'Tecnico de refrigeracion' },
+    { id: 'baja', label: 'Electricista baja tension' },
+    { id: 'media', label: 'Electricista media tension' },
+    { id: 'electronico', label: 'Electronico' },
+    { id: 'ups', label: 'UPS' },
+    { id: 'planta', label: 'Refrigeracion industrial' }
+];
+
+// ============================================
+// FUNCIONES DE DRIVE
+// ============================================
 let _driveConnected = false;
 function driveIsConnected() { return _driveConnected; }
+
 async function conectarDriveAuto() {
-    try { await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' }); _driveConnected = true; console.log('✅ Drive conectado'); }
-    catch(e) { console.log('⚠️ Drive no disponible'); _driveConnected = false; }
+    try {
+        await fetch(APPS_SCRIPT_URL, { method: 'GET', mode: 'no-cors' });
+        _driveConnected = true;
+    } catch (e) { _driveConnected = false; }
 }
+
 async function driveUploadPDF(html, filename) {
     if (!filename.endsWith('.pdf')) filename = filename.replace('.html', '') + '.pdf';
-    try { await fetch(APPS_SCRIPT_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ html, filename }) }); return true; }
-    catch(e) { return false; }
+    try {
+        await fetch(APPS_SCRIPT_URL, {
+            method: 'POST', mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ html, filename })
+        });
+        return true;
+    } catch(e) { return false; }
 }
 
-let clientes = [], tiendas = [], equipos = [], servicios = [], tecnicos = [], cotizaciones = [];
-let jmcTiendas = [], jmcTiendasVersion = '';
-
+// ============================================
+// CARGA DE DATOS
+// ============================================
 async function cargarDatos() {
     const main = document.getElementById('mainContent');
-    if (!main) return;
     main.innerHTML = '<div class="loading-screen"><div class="loading-spinner"></div><p>Cargando...</p></div>';
     try {
-        const [cs, ts, es, ss, tecs, jmc, cots] = await Promise.all([
-            getDocs(query(collection(db,'clientes'), orderBy('nombre'))),
-            getDocs(query(collection(db,'tiendas'), orderBy('nombre'))),
-            getDocs(collection(db,'equipos')),
-            getDocs(query(collection(db,'servicios'), orderBy('fecha','desc'))),
-            getDocs(collection(db,'tecnicos')),
-            getDocs(collection(db,'jmc_tiendas')),
-            getDocs(collection(db,'cotizaciones'))
+        const [cs, es, ss, ts, tis] = await Promise.all([
+            getDocs(query(collection(db, 'empresas'), orderBy('nombre'))),
+            getDocs(collection(db, 'equipos')),
+            getDocs(query(collection(db, 'servicios'), orderBy('fecha', 'desc'))),
+            getDocs(collection(db, 'tecnicos')),
+            getDocs(collection(db, 'tiendas'))
         ]);
-        clientes = cs.docs.map(d => ({ id:d.id, ...d.data() }));
-        tiendas = ts.docs.map(d => ({ id:d.id, ...d.data() }));
-        equipos = es.docs.map(d => ({ id:d.id, ...d.data() }));
-        servicios = ss.docs.map(d => ({ id:d.id, ...d.data() }));
-        tecnicos = tecs.docs.map(d => ({ id:d.id, ...d.data() }));
-        jmcTiendas = jmc.docs.map(d => ({ id:d.id, ...d.data() }));
-        cotizaciones = cots.docs.map(d => ({ id:d.id, ...d.data() }));
-        if(jmcTiendas[0]?.version) jmcTiendasVersion = jmcTiendas[0].version;
-    } catch(err) {
-        console.error(err);
+        clientes  = cs.docs.map(d => ({ id: d.id, ...d.data() }));
+        equipos   = es.docs.map(d => ({ id: d.id, ...d.data() }));
+        servicios = ss.docs.map(d => ({ id: d.id, ...d.data() }));
+        tecnicos  = ts.docs.map(d => ({ id: d.id, ...d.data() }));
+        tiendas   = tis.docs.map(d => ({ id: d.id, ...d.data() }));
+    } catch (err) {
         toast('⚠️ Error de conexión');
-        main.innerHTML = '<div class="page"><p>Error de conexión</p><button class="btn btn-blue" onclick="location.reload()">Reintentar</button></div>';
+        main.innerHTML = '<div class="page" style="text-align:center;padding:2rem;"><p>⚠️ Error al cargar datos</p><button class="btn btn-blue" onclick="location.reload()">Reintentar</button></div>';
         return;
     }
     renderView();
 }
 
-function getEntidad(id) {
-    let ent = clientes.find(c => c.id === id);
-    if (ent) return { ...ent, tipoEntidad: 'cliente' };
-    ent = tiendas.find(t => t.id === id);
-    if (ent) return { ...ent, tipoEntidad: 'tienda' };
-    return null;
-}
-
+// ============================================
+// FUNCIONES AUXILIARES
+// ============================================
 const getEq = id => equipos.find(e => e.id === id);
+const getCl = id => clientes.find(c => c.id === id);
 const getTec = id => tecnicos.find(t => t.id === id);
-const ordenarEquipos = arr => [...arr].sort((a,b) =>
-    (a.marca||'').localeCompare(b.marca||'') ||
-    (a.tipo||'').localeCompare(b.tipo||'') ||
-    (a.modelo||'').localeCompare(b.modelo||'')
-);
-const getEquiposCliente = cid => ordenarEquipos(equipos.filter(e => e.clienteId === cid));
-const getEquiposTienda = tid => ordenarEquipos(equipos.filter(e => e.clienteId === tid));
+const getTienda = id => tiendas.find(t => t.id === id);
+const getTiendasCliente = cid => tiendas.filter(t => t.clienteId === cid);
+const getEquiposTienda = tid => equipos.filter(e => e.tiendaId === tid);
+const getEquiposCliente = cid => equipos.filter(e => e.clienteId === cid);
 const getServiciosEquipo = eid => servicios.filter(s => s.equipoId === eid);
 const getServiciosCliente = cid => servicios.filter(s => getEquiposCliente(cid).some(e => e.id === s.equipoId));
-const getServiciosTienda = tid => servicios.filter(s => getEquiposTienda(tid).some(e => e.id === s.equipoId));
 
-// ===== COTIZACIONES =====
-const ESTADO_PRIORIDAD = { con_oc: 0, subida: 1, instalado: 2, abierta: 3 };
-const ESTADO_LABEL = { abierta: 'Abierta', subida: 'Subida', con_oc: 'Sin entregar', instalado: 'Repuestos instalados' };
-const ESTADO_BADGE = { abierta: 'b-gray', subida: 'b-blue', con_oc: 'b-amber', instalado: 'b-success' };
-const ESTADO_SIGUIENTE = { abierta: 'subida', subida: 'con_oc', con_oc: 'instalado' };
-const getCotizacionesEquipo = eid => [...cotizaciones.filter(c => c.equipoId === eid)].sort((a,b) => {
-    const p = (ESTADO_PRIORIDAD[a.estado]??9) - (ESTADO_PRIORIDAD[b.estado]??9);
-    if (p !== 0) return p;
-    return (b.fechaRecibida||'').localeCompare(a.fechaRecibida||'');
-});
-const getCotizacionesCliente = cid => cotizaciones.filter(c => getEquiposCliente(cid).some(e => e.id === c.equipoId));
-const getCotizacionesTienda = tid => cotizaciones.filter(c => getEquiposTienda(tid).some(e => e.id === c.equipoId));
-function diasSinEntregar(fechaOC) { if(!fechaOC) return 0; return Math.max(0, Math.floor((Date.now() - new Date(fechaOC+'T00:00:00').getTime()) / 86400000)); }
-const getTiendaJMC = (sap) => jmcTiendas.find(t => t.sap === String(sap));
-function esClienteJMC(clienteId) {
-    const c = clientes.find(c => c.id === clienteId);
-    return c?.nombre === 'Jeronimo Martins Colombia';
+function fmtFecha(f) {
+    if (!f) return '';
+    return new Date(f + 'T12:00:00').toLocaleDateString('es-ES');
+}
+function getMesActual() { return new Date().toISOString().slice(0, 7); }
+function esAdmin() { return sesionActual?.rol === 'admin'; }
+function esPropietario(creadoPor) { return sesionActual?.nombre === creadoPor; }
+function puedeEditar(creadoPor) { return esAdmin() || esPropietario(creadoPor); }
+
+function esClienteJMC(clienteId) { return getCl(clienteId)?.nombre === 'Jeronimo Martins Colombia'; }
+function esClienteRO(clienteId) { return getCl(clienteId)?.nombre === 'Construciones Arquitectonicas RO'; }
+function esClienteD1(clienteId) { return getCl(clienteId)?.nombre === 'D1 SAS'; }
+
+function getTiendaJMC(sap) { return jmcTiendas.find(t => t.sap === String(sap)); }
+function getTiendaD1(idTienda) { return d1Tiendas.find(t => t.idTienda === String(idTienda)); }
+
+async function obtenerConsecutivoD1() {
+    const ref = doc(db, 'consecutivos', 'd1');
+    let nuevo;
+    await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        const actual = snap.exists() ? (snap.data().ultimo || 0) : 0;
+        nuevo = actual + 1;
+        tx.set(ref, { ultimo: nuevo }, { merge: true });
+    });
+    return `K-${nuevo}`;
 }
 
-function fmtFecha(f) { if (!f) return ''; return new Date(f + 'T12:00:00').toLocaleDateString('es-ES'); }
-function fmtFechaLarga(f) { if (!f) return ''; return new Date(f + 'T12:00:00').toLocaleDateString('es-ES', { day:'numeric', month:'long', year:'numeric' }); }
+function toast(msg, duration = 3000) {
+    const t = document.getElementById('toastEl');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.classList.remove('show'), duration);
+}
 
-function esAdmin() { return sesionActual?.rol === 'admin'; }
-function toast(msg, duration=3000) { const t = document.getElementById('toastEl'); if (!t) return; t.textContent = msg; t.classList.add('show'); clearTimeout(t._timer); t._timer = setTimeout(() => t.classList.remove('show'), duration); }
-function showModal(html) { const ov = document.getElementById('overlayEl'); if (!ov) return; ov.innerHTML = html; ov.classList.remove('hidden'); ov.onclick = e => { if(e.target === ov) closeModal(); }; }
-function closeModal() { const ov = document.getElementById('overlayEl'); if (!ov) return; ov.classList.add('hidden'); ov.innerHTML = ''; fotosNuevas = [null,null,null]; }
+function showModal(html) {
+    const ov = document.getElementById('overlayEl');
+    ov.innerHTML = html;
+    ov.classList.remove('hidden');
+    ov.onclick = e => { if (e.target === ov) closeModal(); };
+}
+
+function closeModal() {
+    const ov = document.getElementById('overlayEl');
+    ov.classList.add('hidden');
+    ov.innerHTML = '';
+    fotosNuevas = [null, null, null];
+    fotosD1 = [null, null];
+}
 
 function actualizarTopbar() {
     const right = document.getElementById('topbarRight');
     if (!right) return;
-    if (!sesionActual) { right.innerHTML = `<span class="topbar-user">Sin sesión</span>`; }
-    else {
-        const initials = sesionActual.nombre.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase();
+    if (!sesionActual) {
+        right.innerHTML = `<span class="topbar-user">Sin sesion</span>`;
+    } else {
+        const initials = sesionActual.nombre.split(' ').map(n => n[0]).join('').slice(0,2).toUpperCase();
         const rolBadge = esAdmin() ? `<span class="topbar-rol-badge">Admin</span>` : '';
         right.innerHTML = `<div class="topbar-sesion"><div class="topbar-avatar">${initials}</div><div><div style="font-size:0.68rem;color:white;font-weight:700;">${sesionActual.nombre.split(' ')[0]}</div>${rolBadge}</div><button class="topbar-salir" onclick="cerrarSesion()">Salir</button></div>`;
     }
 }
+
 function cerrarSesion() { sesionActual = null; actualizarTopbar(); renderView(); toast('👋 Sesion cerrada'); }
 
-let currentView = 'panel';
-let sesionActual = null;
-let selectedClienteId = null, selectedTiendaId = null, selectedEquipoId = null;
-let fotosNuevas = [null,null,null];
-let _servicioEidActual = null;
-
-// FIX: Lista completa de ciudades colombianas — todas las capitales de departamento + municipios principales
-const CIUDADES = [
-    'Arauca','Armenia','Barranquilla','Bogota','Bucaramanga','Buenaventura',
-    'Bello','Cali','Cartagena','Cartago','Cucuta','Dosquebradas',
-    'Envigado','Florencia','Floridablanca','Giron','Ibague','Itagui',
-    'Leticia','Manizales','Medellin','Mitu','Mocoa','Monteria',
-    'Neiva','Palmira','Pamplona','Pasto','Pereira','Piedecuesta',
-    'Popayan','Puerto Carreno','Puerto Inirida','Quibdo','Riohacha',
-    'Samaniego','San Andres','San Jose del Guaviare','Santa Marta',
-    'Sincelejo','Soacha','Sogamoso','Soledad','Tunja','Turbo',
-    'Valledupar','Villavicencio','Yopal'
-].sort();
-
-const TIPOS_DOC = ['CC','CE','PA','NIT','TI'];
-const ESPECIALIDADES = [{id:'mecanico',label:'Mecanico de plantas'},{id:'baja',label:'Electricista baja tension'},{id:'media',label:'Electricista media tension'},{id:'electronico',label:'Electronico'},{id:'ups',label:'UPS'},{id:'planta',label:'Plantas electricas'}];
-
-function goTo(view, id=null, eid=null) {
+function goTo(view, cid = null, tid = null, eid = null) {
     currentView = view;
-    selectedClienteId = (view === 'detalleCliente') ? id : null;
-    selectedTiendaId = (view === 'detalleTienda') ? id : null;
-    selectedEquipoId = (view === 'historial') ? eid : null;
-    if(view !== 'detalleCliente' && view !== 'detalleTienda' && view !== 'historial') { selectedClienteId = null; selectedTiendaId = null; selectedEquipoId = null; }
+    selectedClienteId = cid;
+    selectedTiendaId = tid;
+    selectedEquipoId = eid;
     closeModal();
     renderView();
-    document.querySelectorAll('.bni').forEach(b => b.classList.toggle('active', b.dataset.page === view || (view === 'detalleCliente' && b.dataset.page === 'clientes') || (view === 'detalleTienda' && b.dataset.page === 'tiendas') || (view === 'historial' && (b.dataset.page === 'clientes' || b.dataset.page === 'tiendas'))));
+    document.querySelectorAll('.bni').forEach(b => {
+        b.classList.toggle('active', b.dataset.page === view || (view === 'detalle' && b.dataset.page === 'clientes') || (view === 'historial' && b.dataset.page === 'clientes'));
+    });
 }
 
 function renderView() {
-    if(!sesionActual && currentView !== 'panel' && currentView !== 'tecnicos') currentView = 'panel';
+    if (!sesionActual && currentView !== 'panel' && currentView !== 'tecnicos') currentView = 'panel';
     const main = document.getElementById('mainContent');
-    if (!main) return;
-    const botnav = document.getElementById('botnavEl');
-    if (botnav) botnav.style.display = 'flex';
-    switch(currentView) {
+    document.getElementById('botnavEl').style.display = 'flex';
+    switch (currentView) {
         case 'panel': main.innerHTML = renderPanel(); break;
         case 'clientes': main.innerHTML = renderClientes(); break;
-        case 'tiendas': main.innerHTML = renderTiendas(); break;
-        case 'detalleCliente': main.innerHTML = renderDetalleCliente(); break;
-        case 'detalleTienda': main.innerHTML = renderDetalleTienda(); break;
+        case 'detalle': main.innerHTML = renderDetalleCliente(); break;
+        case 'detalle-tienda': main.innerHTML = renderDetalleTienda(); break;
         case 'historial': main.innerHTML = renderHistorial(); break;
-        case 'servicios': main.innerHTML = renderServicios(); setTimeout(() => { if(window.aplicarFiltros) aplicarFiltros(); }, 100); break;
+        case 'equipos': main.innerHTML = renderEquipos(); break;
+        case 'servicios': main.innerHTML = renderServicios(); if (window.aplicarFiltros) aplicarFiltros(); break;
         case 'mantenimientos': main.innerHTML = renderMantenimientos(); break;
         case 'tecnicos': main.innerHTML = renderTecnicos(); break;
         default: main.innerHTML = renderPanel();
     }
 }
 
-// FIX: Panel — preselecciona CEDI cuyo nombre contenga "IBAGUE" (insensible a mayúsculas/tildes).
-// Si no existe, usa el primer CEDI; si no hay CEDIs, usa la primera tienda.
-// FIX: Se elimina el patrón originalRenderPanel + bind(this) que fallaba en módulos ES (this=undefined).
+// ============================================
+// RENDERIZADO DE VISTAS
+// ============================================
 function renderPanel() {
-    const opcionesCedi = clientes.map(c => ({ id:c.id, nombre:c.nombre, tipo:'cliente' }));
-    const opcionesTienda = tiendas.map(t => ({ id:t.id, nombre:t.nombre, tipo:'tienda' }));
-    const opciones = [...opcionesCedi, ...opcionesTienda];
-    if(opciones.length === 0) {
-        return `<div class="page"><div class="panel-banner">No hay CEDIs ni Tiendas registradas.</div></div>`;
-    }
-
-    // Buscar CEDI Ibagué
-    const normalize = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-    let defaultIdx = opcionesCedi.findIndex(c => normalize(c.nombre).includes('ibague'));
-    if(defaultIdx === -1) defaultIdx = 0; // primer CEDI si no hay Ibagué
-
-    const html = `<div class="page" id="panelContainer">
-        <div class="selector-panel"><select id="panelSelector" style="width:100%;padding:0.6rem 0.75rem;border:1px solid var(--border);border-radius:10px;font-size:0.88rem;font-weight:500;background:white;color:var(--text);">
-            ${opciones.map((opt, i) => {
-                const selected = i === defaultIdx ? 'selected' : '';
-                return `<option value="${opt.tipo}|${opt.id}" ${selected}>${opt.tipo === 'cliente' ? 'CEDI: ' : 'TIENDA: '}${opt.nombre}</option>`;
-            }).join('')}
-        </select></div>
-        <div id="panelStats"></div>
-        <div id="panelEquiposFuera"></div>
-    </div>`;
-
-    // Iniciar panel después del render
-    setTimeout(() => {
-        const selector = document.getElementById('panelSelector');
-        if(!selector) return;
-        const [tipo, id] = selector.value.split('|');
-        actualizarPanel(id, tipo);
-        selector.addEventListener('change', (e) => {
-            const [newTipo, newId] = e.target.value.split('|');
-            actualizarPanel(newId, newTipo);
-        });
-    }, 100);
-
-    return html;
+    const hoy = new Date();
+    const prefijo = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}`;
+    const man  = servicios.filter(s => s.tipo === 'Mantenimiento');
+    const rep  = servicios.filter(s => s.tipo === 'Reparacion');
+    const inst = servicios.filter(s => s.tipo === 'Instalacion');
+    const manM = man.filter(s  => s.fecha?.startsWith(prefijo));
+    const repM = rep.filter(s  => s.fecha?.startsWith(prefijo));
+    const instM= inst.filter(s => s.fecha?.startsWith(prefijo));
+    const eqOp   = equipos.filter(e => e.estado === 'Operativo').length;
+    const eqFs   = equipos.filter(e => e.estado === 'Fuera de servicio').length;
+    const eqBaja = equipos.filter(e => e.estado === 'Dar de baja').length;
+    const eqSin  = equipos.filter(e => !e.estado || e.estado === '').length;
+    const row = (n,l,c) => `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f0f0f0;font-size:0.78rem;"><span>${l}</span><span style="font-weight:700;color:${c};">${n}</span></div>`;
+    const col = (titulo, color, rows) => `<div style="background:white;border-radius:10px;padding:10px;box-shadow:0 1px 6px rgba(0,0,0,0.08);"><div style="font-weight:700;font-size:0.72rem;color:#555;border-bottom:2px solid ${color};padding-bottom:4px;margin-bottom:6px;">${titulo}</div>${rows}</div>`;
+    const eqsFuera = equipos.filter(e=>e.estado==='Fuera de servicio');
+    return `<div class="page">
+<div style="background:#0c214a;color:white;padding:10px 14px;border-radius:10px;margin-bottom:12px;display:flex;align-items:center;gap:10px;">
+  <img src="https://raw.githubusercontent.com/capacitADA/JDARQ/main/JDARQ-logo.png" style="height:32px;filter:brightness(0) invert(1);" onerror="this.style.display='none'">
+  <div><div style="font-weight:700;font-size:0.95rem;">Panel Principal</div><div style="font-size:0.72rem;opacity:0.85;">Refrigeración Industrial</div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+  ${col('ESTADO','#e4002b', row(eqOp,'Operativos','#16a34a')+row(eqFs,'Fuera serv.','#dc2626')+row(eqBaja,'Dar de baja','#f59e0b')+row(eqSin,'Sin info','#94a3b8'))}
+  ${col('SERV. ANUAL','#2563eb', row(man.length,'Mantenm.','#2563eb')+row(rep.length,'Reparación','#dc2626')+row(inst.length,'Instalación','#16a34a'))}
+  ${col('SERV. MES','#7c3aed', row(manM.length,'Mantenm.','#2563eb')+row(repM.length,'Reparación','#dc2626')+row(instM.length,'Instalación','#16a34a'))}
+</div>
+<div style="background:white;border-radius:10px;padding:10px;box-shadow:0 1px 6px rgba(0,0,0,0.08);">
+  <div style="font-weight:700;font-size:0.8rem;margin-bottom:6px;color:#e4002b;">⚠️ Equipos FUERA DE SERVICIO</div>
+  ${eqsFuera.length===0
+    ? '<div style="color:#94a3b8;font-size:0.78rem;">No hay equipos en este estado.</div>'
+    : eqsFuera.map(e=>{const cl=getCl(e.clienteId);return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:0.78rem;"><span>${e.marca} ${e.modelo} <span style="color:#94a3b8;">· ${e.ubicacion||''}</span></span><span style="color:#555;">${cl?.nombre||''}</span></div>`;}).join('')}
+</div></div>`;
 }
 
-async function actualizarPanel(entidadId, entidadTipo) {
-    const equiposEntidad = equipos.filter(e => e.clienteId === entidadId);
-    let operativos=0, fueraServicio=0, darBaja=0, sinInfo=0;
-    for(const eq of equiposEntidad) {
-        // FIX: usar solo el ÚLTIMO estado (primer servicio con estadoReparacion al ordenar desc)
-        const ss = getServiciosEquipo(eq.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
-        let ultimoEstado = null;
-        for(const s of ss) { if(s.estadoReparacion) { ultimoEstado = s.estadoReparacion; break; } }
-        if(ultimoEstado === 'OPERATIVO') operativos++;
-        else if(ultimoEstado === 'FUERA DE SERVICIO') fueraServicio++;
-        else if(ultimoEstado === 'DAR DE BAJA') darBaja++;
-        else sinInfo++;
-    }
-    const hoy = new Date(), anioActual = hoy.getFullYear(), mesActual = hoy.getMonth()+1;
-    let anualMant=0, anualRep=0, anualInst=0, mensualMant=0, mensualRep=0, mensualInst=0;
-    for(const eq of equiposEntidad) {
-        for(const s of getServiciosEquipo(eq.id)) {
-            if(!s.fecha) continue;
-            const fecha = new Date(s.fecha+'T12:00:00');
-            if((hoy-fecha)/(1000*60*60*24*365) <= 1) {
-                if(s.tipo === 'Mantenimiento') anualMant++;
-                else if(s.tipo === 'Reparacion') anualRep++;
-                else if(s.tipo === 'Instalacion') anualInst++;
-            }
-            if(fecha.getFullYear() === anioActual && (fecha.getMonth()+1) === mesActual) {
-                if(s.tipo === 'Mantenimiento') mensualMant++;
-                else if(s.tipo === 'Reparacion') mensualRep++;
-                else if(s.tipo === 'Instalacion') mensualInst++;
-            }
-        }
-    }
-    const statsHtml = `<div class="panel-grid-3col">
-        <div class="panel-cell"><div class="panel-cell-header">ESTADO</div><div class="panel-cell-content">
-            <div><span class="pc-lbl">Operativos</span><span class="panel-number pn-green">${operativos}</span></div>
-            <div><span class="pc-lbl">Fuera serv.</span><span class="panel-number pn-yellow">${fueraServicio}</span></div>
-            <div><span class="pc-lbl">Dar de baja</span><span class="panel-number pn-red">${darBaja}</span></div>
-            <div><span class="pc-lbl">Sin info</span><span class="panel-number pn-gray">${sinInfo}</span></div>
-        </div></div>
-        <div class="panel-cell"><div class="panel-cell-header">SERV. ANUAL</div><div class="panel-cell-content">
-            <div><span class="pc-lbl">Mantenim.</span><span class="panel-number">${anualMant}</span></div>
-            <div><span class="pc-lbl">Reparación</span><span class="panel-number">${anualRep}</span></div>
-            <div><span class="pc-lbl">Instalación</span><span class="panel-number">${anualInst}</span></div>
-        </div></div>
-        <div class="panel-cell"><div class="panel-cell-header">SERV. MES</div><div class="panel-cell-content">
-            <div><span class="pc-lbl">Mantenim.</span><span class="panel-number">${mensualMant}</span></div>
-            <div><span class="pc-lbl">Reparación</span><span class="panel-number">${mensualRep}</span></div>
-            <div><span class="pc-lbl">Instalación</span><span class="panel-number">${mensualInst}</span></div>
-        </div></div>
-    </div>`;
-
-    // FIX: solo equipos cuyo ÚLTIMO estado sea "FUERA DE SERVICIO"
-    const equiposFuera = equiposEntidad.filter(eq => {
-        const ss = getServiciosEquipo(eq.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
-        for(const s of ss) { if(s.estadoReparacion) return s.estadoReparacion === 'FUERA DE SERVICIO'; }
-        return false;
-    });
-    let fueraHtml = '<div class="equipos-fuera"><h4>⚙️ Equipos FUERA DE SERVICIO</h4><div class="scroll-horizontal">';
-    if(equiposFuera.length === 0) {
-        fueraHtml += '<span style="font-size:0.75rem;color:var(--hint);">No hay equipos en este estado.</span>';
-    } else {
-        for(const eq of equiposFuera) {
-            fueraHtml += `<div class="equipo-card" onclick="goTo('historial', null, '${eq.id}')">${eq.marca} ${eq.tipo || ''} ${eq.modelo}</div>`;
-        }
-    }
-    fueraHtml += '</div></div>';
-
-    const ent = getEntidad(entidadId);
-    const exportBtn = `<div style="display:flex;justify-content:flex-end;margin-bottom:0.5rem;">
-        <button class="btn btn-gray btn-sm" onclick="exportarHistorialEntidad('${entidadId}')">📊 Exportar Excel</button>
-    </div>`;
-
-    const statsDiv = document.getElementById('panelStats');
-    const fueraDiv = document.getElementById('panelEquiposFuera');
-    if(statsDiv) statsDiv.innerHTML = exportBtn + statsHtml;
-    if(fueraDiv) fueraDiv.innerHTML = fueraHtml;
-}
-
-// Exporta TODO el historial de todos los equipos del CEDI o Tienda seleccionado
-function exportarHistorialEntidad(entidadId) {
-    const ent = getEntidad(entidadId);
-    const equiposEntidad = equipos.filter(e => e.clienteId === entidadId);
-    if(!equiposEntidad.length) { toast('⚠️ No hay activos registrados'); return; }
-
-    const filas = [];
-    for(const eq of equiposEntidad) {
-        const ss = getServiciosEquipo(eq.id).sort((a,b) => new Date(a.fecha) - new Date(b.fecha));
-        for(const s of ss) {
-            filas.push([
-                fmtFecha(s.fecha),
-                s.tipo || '',
-                s.tecnico || '',
-                s.estadoReparacion || '',
-                s.descripcion || '',
-                s.proximoMantenimiento ? fmtFecha(s.proximoMantenimiento) : '',
-                ent?.nombre || '',
-                `${eq.marca} ${eq.tipo||''} ${eq.modelo}`.trim(),
-                eq.marca || '',
-                eq.modelo || '',
-                eq.serie || '',
-                eq.ubicacion || ''
-            ]);
-        }
-    }
-
-    if(!filas.length) { toast('⚠️ Sin servicios para exportar'); return; }
-
-    const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
-    const header = ['Fecha','Tipo','Tecnico','Estado','Descripcion','Proximo Mantenimiento','CEDI/Tienda','Activo','Marca','Modelo','Serie','Ubicacion'];
-    const csv = '\uFEFF' + [header.map(esc).join(','), ...filas.map(f => f.map(esc).join(','))].join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const nombre = ent?.nombre || entidadId;
-    a.download = `Historial_${nombre.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast(`📊 Excel descargado — ${filas.length} servicios`);
-}
 
 function renderClientes() {
-    return `<div class="page"><div class="sec-head"><h2>CEDIs (${clientes.length})</h2><button class="btn btn-blue btn-sm" onclick="modalNuevoCliente()">+ Nuevo</button></div>
+    return `<div class="page">
+        <div class="sec-head"><h2>Clientes (${clientes.length})</h2>${esAdmin() ? `<button class="btn btn-blue btn-sm" onclick="modalNuevoCliente()">+ Nuevo</button>` : ''}</div>
         <input class="search" placeholder="🔍 Buscar..." oninput="filtrarClientes(this.value)" id="searchClientes">
-        <div id="clientesGrid">${clientes.map(c => `<div class="cc" data-search="${(c.nombre+c.ciudad+c.telefono+(c.email||'')).toLowerCase()}">
-            <div style="display:flex;justify-content:space-between;"><div class="cc-name">${c.nombre}</div>${esAdmin()?`<div><button class="ib" onclick="modalEditarCliente('${c.id}')">✏️</button><button class="ib" onclick="modalEliminarCliente('${c.id}')">🗑️</button></div>`:''}</div>
-            <div class="cc-row">📞 ${c.telefono}</div>${c.email?`<div class="cc-row">📧 ${c.email}</div>`:''}
-            <div class="cc-row">📍 ${c.direccion}</div><span class="city-tag">${c.ciudad}</span>
-            ${c.latitud?`<div><a class="map-link" href="https://maps.google.com/?q=${c.latitud},${c.longitud}" target="_blank">🗺️ Ver GPS</a></div>`:''}
-            <div class="cc-meta">${getEquiposCliente(c.id).length} activo(s) · ${getServiciosCliente(c.id).length} servicio(s)</div>
-            <button class="link-btn" onclick="goTo('detalleCliente','${c.id}')">Ver activos →</button>
-        </div>`).join('')}</div></div>`;
+        <div id="clientesGrid">
+        ${clientes.map(c => {
+            const numTiendas = tiendas.filter(t => t.cliente === c.nombre).length;
+            const numEquipos = getEquiposCliente(c.id).length;
+            const numServ    = getServiciosCliente(c.id).length;
+            return `<div class="cc" data-search="${(c.nombre+(c.nit||'')).toLowerCase()}">
+                <div style="display:flex;justify-content:space-between;">
+                    <div class="cc-name">${c.nombre}</div>
+                    ${esAdmin() ? `<div><button class="ib" onclick="modalEditarCliente('${c.id}')">✏️</button><button class="ib" onclick="modalEliminarCliente('${c.id}')">🗑️</button></div>` : ''}
+                </div>
+                ${c.nit ? `<div class="cc-row">🪪 NIT: ${c.nit}</div>` : ''}
+                ${c.telefono ? `<div class="cc-row">📞 ${c.telefono}</div>` : ''}
+                <div class="cc-meta">${numTiendas} tienda(s) · ${numEquipos} activo(s) · ${numServ} servicio(s)</div>
+                <button class="link-btn" onclick="goTo('detalle','${c.id}')">Ver tiendas →</button>
+            </div>`;
+        }).join('')}
+        </div>
+    </div>`;
 }
 
-function filtrarClientes(v) { const txt=v.toLowerCase(); document.querySelectorAll('#clientesGrid .cc').forEach(c=>{c.style.display=(c.dataset.search||'').includes(txt)?'':'none';}); }
+function filtrarClientes(v) {
+    const txt = v.toLowerCase();
+    document.querySelectorAll('#clientesGrid .cc').forEach(c => { c.style.display = (c.dataset.search||'').includes(txt) ? '' : 'none'; });
+}
 
 function renderDetalleCliente() {
-    const c = clientes.find(x=>x.id===selectedClienteId); if(!c) { goTo('clientes'); return ''; }
-    const eqs = getEquiposCliente(c.id);
-    return `<div class="page"><div class="det-hdr"><button class="back" onclick="goTo('clientes')">← Volver</button><div><div class="cc-name">${c.nombre}</div><div class="cc-meta">${c.ciudad}</div></div></div>
-        <div class="info-box"><div class="cc-row">📞 <strong>${c.telefono}</strong></div>${c.email?`<div class="cc-row">📧 ${c.email}</div>`:''}
-        <div class="cc-row">📍 ${c.direccion}</div>${c.latitud?`<a class="map-link" href="https://maps.google.com/?q=${c.latitud},${c.longitud}" target="_blank">🗺️ Ver en Google Maps</a>`:'<div class="cc-meta">Sin GPS</div>'}</div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;gap:6px;"><span style="font-weight:700;">Activos (${eqs.length})</span><div style="display:flex;gap:6px;"><button class="btn btn-gray btn-sm" onclick="exportarCotizacionesEntidad('${c.id}')">📊 Cotizaciones</button><button class="btn btn-blue btn-sm" onclick="modalNuevoEquipo('${c.id}')">+ Activo</button></div></div>
-        ${eqs.map(e=>`<div class="ec"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s) · ${getCotizacionesEquipo(e.id).length} cotización(es)</div></div>${esAdmin()?`<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>`:''}</div>
-        <div class="ec-btns"><button class="ab" onclick="goTo('historial','${c.id}','${e.id}')">📋 Servicios</button><button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button><button class="ab" onclick="modalCotizaciones('${e.id}')">💰 Cotizaciones</button><button class="ab" onclick="modalQR('${e.id}')">📱 QR</button></div></div>`).join('')}
+    const c = getCl(selectedClienteId);
+    if (!c) { goTo('clientes'); return ''; }
+    const tiendasCliente = getTiendasCliente(c.id);
+    return `<div class="page">
+        <div class="det-hdr">
+            <button class="back" onclick="goTo('clientes')">← Volver</button>
+            <div><div class="cc-name">${c.nombre}</div></div>
+        </div>
+        ${c.nit ? `<div class="info-box"><div class="cc-row">🪪 NIT: ${c.nit}</div>${c.telefono?`<div class="cc-row">📞 ${c.telefono}</div>`:''}</div>` : ''}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;">
+            <span style="font-weight:700;">Tiendas (${tiendasCliente.length})</span>
+            <input class="search" placeholder="🔍 Buscar tienda..." oninput="filtrarTiendasDetalle(this.value)" style="width:180px;margin:0;">
+        </div>
+        <div id="tiendasDetalleGrid">
+        ${tiendasCliente.map(t => {
+            const numEq  = getEquiposTienda(t.id).length;
+            const numSrv = servicios.filter(s => getEquiposTienda(t.id).some(e => e.id === s.equipoId)).length;
+            return `<div class="ec" data-search="${(t.codigo+t.nombre+t.municipio).toLowerCase()}">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                    <div>
+                        <div class="ec-name">${t.nombre}</div>
+                        <div class="ec-meta">📍 ${t.municipio||''} · ${t.departamento||''}</div>
+                        <div class="ec-meta">Código: <strong>${t.codigo}</strong></div>
+                        ${t.latitud ? `<a class="map-link" href="https://maps.google.com/?q=${t.latitud},${t.longitud}" target="_blank">🗺️ Ver GPS</a>` : ''}
+                        <div class="ec-meta">${numEq} activo(s) · ${numSrv} incidencia(s)</div>
+                    </div>
+                </div>
+                <div class="ec-btns">
+                    <button class="ab" onclick="goTo('detalle-tienda','${c.id}','${t.id}')">🔧 Ver activos</button>
+                    <button class="ab" onclick="modalQRTienda('${t.id}')">📱 QR</button>
+                </div>
+            </div>`;
+        }).join('')}
+        </div>
     </div>`;
 }
 
-function modalNuevoCliente() {
-    showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo CEDI</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <label class="fl">SAP *</label><input class="fi" id="cSap">
-        <label class="fl">Nombre *</label><input class="fi" id="cNombre">
-        <div class="fr"><div><label class="fl">Ciudad *</label><select class="fi" id="cCiudad">${CIUDADES.map(ci=>`<option>${ci}</option>`).join('')}</select></div>
-        <div><label class="fl">Departamento</label><input class="fi" id="cDepartamento"></div></div>
-        <label class="fl">Dirección *</label><input class="fi" id="cDir">
-        <label class="fl">Coordinador *</label><input class="fi" id="cCoordinador">
-        <label class="fl">Cargo *</label><input class="fi" id="cCargo">
-        <label class="fl">Teléfono *</label><input class="fi" id="cTel" type="tel">
-        <label class="fl">Email (opcional)</label><input class="fi" id="cEmail">
-        <button class="btn btn-blue btn-full" onclick="obtenerGPS('cLat','cLng')">📍 Compartir ubicación</button>
-        <input type="hidden" id="cLat"><input type="hidden" id="cLng">
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarCliente()">Guardar</button></div>
-    </div></div>`);
-}
-
-async function guardarCliente() {
-    const sap = document.getElementById('cSap')?.value?.trim();
-    const nombre = document.getElementById('cNombre')?.value?.trim();
-    const ciudad = document.getElementById('cCiudad')?.value;
-    const depto = document.getElementById('cDepartamento')?.value?.trim();
-    const direccion = document.getElementById('cDir')?.value?.trim();
-    const coordinador = document.getElementById('cCoordinador')?.value?.trim();
-    const cargo = document.getElementById('cCargo')?.value?.trim();
-    const telefono = document.getElementById('cTel')?.value?.trim();
-    const email = document.getElementById('cEmail')?.value?.trim();
-    const lat = document.getElementById('cLat')?.value || '';
-    const lng = document.getElementById('cLng')?.value || '';
-    if (!sap || !nombre || !ciudad || !direccion || !coordinador || !cargo || !telefono) { toast('⚠️ Complete todos los campos obligatorios'); return; }
-    try {
-        await addDoc(collection(db, 'clientes'), { sap, nombre, ciudad, departamento: depto, direccion, coordinador, cargo, telefono, email: email || '', latitud: lat, longitud: lng });
-        closeModal(); await cargarDatos(); toast('✅ CEDI guardado');
-    } catch(err) { toast('❌ Error: ' + err.message); }
-}
-
-function modalEditarCliente(cid) {
-    const c = clientes.find(x=>x.id===cid); if(!c) return;
-    showModal(`<div class="modal"><div class="modal-h"><h3>Editar CEDI</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <label class="fl">SAP</label><input class="fi" id="eSap" value="${c.sap||''}">
-        <label class="fl">Nombre</label><input class="fi" id="eNombre" value="${c.nombre}">
-        <div class="fr"><div><label class="fl">Ciudad</label><select class="fi" id="eCiudad">${CIUDADES.map(ci=>`<option ${ci===c.ciudad?'selected':''}>${ci}</option>`).join('')}</select></div>
-        <div><label class="fl">Departamento</label><input class="fi" id="eDepartamento" value="${c.departamento||''}"></div></div>
-        <label class="fl">Dirección</label><input class="fi" id="eDir" value="${c.direccion}">
-        <label class="fl">Coordinador</label><input class="fi" id="eCoordinador" value="${c.coordinador||''}">
-        <label class="fl">Cargo</label><input class="fi" id="eCargo" value="${c.cargo||''}">
-        <label class="fl">Teléfono</label><input class="fi" id="eTel" value="${c.telefono}">
-        <label class="fl">Email</label><input class="fi" id="eEmail" value="${c.email||''}">
-        <button class="btn btn-blue btn-full" onclick="obtenerGPS('eLat','eLng')">📍 Actualizar ubicación</button>
-        <input type="hidden" id="eLat" value="${c.latitud||''}"><input type="hidden" id="eLng" value="${c.longitud||''}">
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarCliente('${cid}')">Guardar</button></div>
-    </div></div>`);
-}
-
-async function actualizarCliente(cid) {
-    const data = {
-        sap: document.getElementById('eSap').value,
-        nombre: document.getElementById('eNombre').value,
-        ciudad: document.getElementById('eCiudad').value,
-        departamento: document.getElementById('eDepartamento').value,
-        direccion: document.getElementById('eDir').value,
-        coordinador: document.getElementById('eCoordinador').value,
-        cargo: document.getElementById('eCargo').value,
-        telefono: document.getElementById('eTel').value,
-        email: document.getElementById('eEmail').value,
-        latitud: document.getElementById('eLat').value,
-        longitud: document.getElementById('eLng').value
-    };
-    try { await updateDoc(doc(db, 'clientes', cid), data); closeModal(); await cargarDatos(); toast('✅ CEDI actualizado'); } catch(err) { toast('❌ Error: ' + err.message); }
-}
-
-function modalEliminarCliente(cid) { if(!confirm('¿Eliminar este CEDI y todos sus activos/servicios?')) return; eliminarCliente(cid); }
-async function eliminarCliente(cid) {
-    const eids = getEquiposCliente(cid).map(e=>e.id);
-    try { for(const eid of eids) { for(const s of getServiciosEquipo(eid)) await deleteDoc(doc(db,'servicios',s.id)); await deleteDoc(doc(db,'equipos',eid)); } await deleteDoc(doc(db,'clientes',cid)); await cargarDatos(); goTo('clientes'); toast('🗑️ CEDI eliminado'); } catch(err) { toast('❌ Error: '+err.message); }
-}
-
-function renderTiendas() {
-    return `<div class="page"><div class="sec-head"><h2>Tiendas (${tiendas.length})</h2><button class="btn btn-blue btn-sm" onclick="modalNuevaTienda()">+ Nueva</button></div>
-        <input class="search" placeholder="🔍 Buscar..." oninput="filtrarTiendas(this.value)" id="searchTiendas">
-        <div id="tiendasGrid">${tiendas.map(t=>`<div class="cc" data-search="${(t.nombre+t.ciudad+t.telefono).toLowerCase()}">
-            <div style="display:flex;justify-content:space-between;"><div class="cc-name">${t.nombre}</div>${esAdmin()?`<div><button class="ib" onclick="modalEditarTienda('${t.id}')">✏️</button><button class="ib" onclick="modalEliminarTienda('${t.id}')">🗑️</button></div>`:''}</div>
-            <div class="cc-row">📞 ${t.telefono}</div><div class="cc-row">📍 ${t.direccion}</div><span class="city-tag">${t.ciudad}</span>
-            ${t.latitud?`<div><a class="map-link" href="https://maps.google.com/?q=${t.latitud},${t.longitud}" target="_blank">🗺️ Ver GPS</a></div>`:''}
-            <div class="cc-meta">${getEquiposTienda(t.id).length} activo(s) · ${getServiciosTienda(t.id).length} servicio(s)</div>
-            <button class="link-btn" onclick="goTo('detalleTienda','${t.id}')">Ver activos →</button>
-        </div>`).join('')}</div></div>`;
-}
-
-function filtrarTiendas(v) { const txt=v.toLowerCase(); document.querySelectorAll('#tiendasGrid .cc').forEach(c=>{c.style.display=(c.dataset.search||'').includes(txt)?'':'none';}); }
+window.filtrarTiendasDetalle = v => {
+    document.querySelectorAll('#tiendasDetalleGrid .ec').forEach(el => {
+        el.style.display = (el.dataset.search||'').includes(v.toLowerCase()) ? '' : 'none';
+    });
+};
 
 function renderDetalleTienda() {
-    const t = tiendas.find(x=>x.id===selectedTiendaId); if(!t) { goTo('tiendas'); return ''; }
+    const t = getTienda(selectedTiendaId);
+    const c = getCl(selectedClienteId);
+    if (!t) { goTo('detalle', selectedClienteId); return ''; }
     const eqs = getEquiposTienda(t.id);
-    return `<div class="page"><div class="det-hdr"><button class="back" onclick="goTo('tiendas')">← Volver</button><div><div class="cc-name">${t.nombre}</div><div class="cc-meta">${t.ciudad}</div></div></div>
-        <div class="info-box"><div class="cc-row">📞 <strong>${t.telefono}</strong></div><div class="cc-row">📍 ${t.direccion}</div>${t.latitud?`<a class="map-link" href="https://maps.google.com/?q=${t.latitud},${t.longitud}" target="_blank">🗺️ Ver en Google Maps</a>`:'<div class="cc-meta">Sin GPS</div>'}</div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;gap:6px;"><span style="font-weight:700;">Activos (${eqs.length})</span><div style="display:flex;gap:6px;"><button class="btn btn-gray btn-sm" onclick="exportarCotizacionesEntidad('${t.id}')">📊 Cotizaciones</button><button class="btn btn-blue btn-sm" onclick="modalNuevoEquipo('${t.id}')">+ Activo</button></div></div>
-        ${eqs.map(e=>`<div class="ec"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">Serie: ${e.serie||'S/N'}</div><div class="ec-meta">${getServiciosEquipo(e.id).length} servicio(s) · ${getCotizacionesEquipo(e.id).length} cotización(es)</div></div>${esAdmin()?`<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>`:''}</div>
-        <div class="ec-btns"><button class="ab" onclick="goTo('historial','${t.id}','${e.id}')">📋 Servicios</button><button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button><button class="ab" onclick="modalCotizaciones('${e.id}')">💰 Cotizaciones</button><button class="ab" onclick="modalQR('${e.id}')">📱 QR</button></div></div>`).join('')}
-    </div>`;
-}
-
-function modalNuevaTienda() {
-    showModal(`<div class="modal"><div class="modal-h"><h3>Nueva Tienda</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <label class="fl">SAP *</label><input class="fi" id="tSap">
-        <label class="fl">Nombre *</label><input class="fi" id="tNombre">
-        <div class="fr"><div><label class="fl">Ciudad *</label><select class="fi" id="tCiudad">${CIUDADES.map(ci=>`<option>${ci}</option>`).join('')}</select></div>
-        <div><label class="fl">Departamento</label><input class="fi" id="tDepartamento"></div></div>
-        <label class="fl">Dirección *</label><input class="fi" id="tDir">
-        <label class="fl">Coordinador *</label><input class="fi" id="tCoordinador">
-        <label class="fl">Cargo *</label><input class="fi" id="tCargo">
-        <label class="fl">Teléfono *</label><input class="fi" id="tTel" type="tel">
-        <button class="btn btn-blue btn-full" onclick="obtenerGPS('tLat','tLng')">📍 Compartir ubicación</button>
-        <input type="hidden" id="tLat"><input type="hidden" id="tLng">
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarTienda()">Guardar</button></div>
-    </div></div>`);
-}
-
-async function guardarTienda() {
-    const sap = document.getElementById('tSap')?.value?.trim();
-    const nombre = document.getElementById('tNombre')?.value?.trim();
-    const ciudad = document.getElementById('tCiudad')?.value;
-    const depto = document.getElementById('tDepartamento')?.value?.trim();
-    const direccion = document.getElementById('tDir')?.value?.trim();
-    const coordinador = document.getElementById('tCoordinador')?.value?.trim();
-    const cargo = document.getElementById('tCargo')?.value?.trim();
-    const telefono = document.getElementById('tTel')?.value?.trim();
-    const lat = document.getElementById('tLat')?.value || '';
-    const lng = document.getElementById('tLng')?.value || '';
-    if (!sap || !nombre || !ciudad || !direccion || !coordinador || !cargo || !telefono) { toast('⚠️ Complete todos los campos obligatorios'); return; }
-    try {
-        await addDoc(collection(db, 'tiendas'), { sap, nombre, ciudad, departamento: depto, direccion, coordinador, cargo, telefono, latitud: lat, longitud: lng });
-        closeModal(); await cargarDatos(); toast('✅ Tienda guardada');
-    } catch(err) { toast('❌ Error: ' + err.message); }
-}
-
-function modalEditarTienda(tid) {
-    const t = tiendas.find(x=>x.id===tid); if(!t) return;
-    showModal(`<div class="modal"><div class="modal-h"><h3>Editar Tienda</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <label class="fl">SAP</label><input class="fi" id="etSap" value="${t.sap||''}">
-        <label class="fl">Nombre</label><input class="fi" id="etNombre" value="${t.nombre}">
-        <div class="fr"><div><label class="fl">Ciudad</label><select class="fi" id="etCiudad">${CIUDADES.map(ci=>`<option ${ci===t.ciudad?'selected':''}>${ci}</option>`).join('')}</select></div>
-        <div><label class="fl">Departamento</label><input class="fi" id="etDepartamento" value="${t.departamento||''}"></div></div>
-        <label class="fl">Dirección</label><input class="fi" id="etDir" value="${t.direccion}">
-        <label class="fl">Coordinador</label><input class="fi" id="etCoordinador" value="${t.coordinador||''}">
-        <label class="fl">Cargo</label><input class="fi" id="etCargo" value="${t.cargo||''}">
-        <label class="fl">Teléfono</label><input class="fi" id="etTel" value="${t.telefono}">
-        <button class="btn btn-blue btn-full" onclick="obtenerGPS('etLat','etLng')">📍 Actualizar ubicación</button>
-        <input type="hidden" id="etLat" value="${t.latitud||''}"><input type="hidden" id="etLng" value="${t.longitud||''}">
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarTienda('${tid}')">Guardar</button></div>
-    </div></div>`);
-}
-
-async function actualizarTienda(tid) {
-    const data = {
-        sap: document.getElementById('etSap').value,
-        nombre: document.getElementById('etNombre').value,
-        ciudad: document.getElementById('etCiudad').value,
-        departamento: document.getElementById('etDepartamento').value,
-        direccion: document.getElementById('etDir').value,
-        coordinador: document.getElementById('etCoordinador').value,
-        cargo: document.getElementById('etCargo').value,
-        telefono: document.getElementById('etTel').value,
-        latitud: document.getElementById('etLat').value,
-        longitud: document.getElementById('etLng').value
-    };
-    try { await updateDoc(doc(db, 'tiendas', tid), data); closeModal(); await cargarDatos(); toast('✅ Tienda actualizada'); } catch(err) { toast('❌ Error: ' + err.message); }
-}
-
-function modalEliminarTienda(tid) { if(!confirm('¿Eliminar esta Tienda y todos sus activos/servicios?')) return; eliminarTienda(tid); }
-async function eliminarTienda(tid) {
-    const eids = getEquiposTienda(tid).map(e=>e.id);
-    try { for(const eid of eids) { for(const s of getServiciosEquipo(eid)) await deleteDoc(doc(db,'servicios',s.id)); await deleteDoc(doc(db,'equipos',eid)); } await deleteDoc(doc(db,'tiendas',tid)); await cargarDatos(); goTo('tiendas'); toast('🗑️ Tienda eliminada'); } catch(err) { toast('❌ Error: '+err.message); }
-}
-
-function modalNuevoEquipo(entidadId) {
-    showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo activo</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <div class="fr"><div><label class="fl">Marca *</label><input class="fi" id="qMarca"></div><div><label class="fl">Modelo *</label><input class="fi" id="qModelo"></div></div>
-        <label class="fl">Serie</label><input class="fi" id="qSerie">
-        <label class="fl">Tipo</label><input class="fi" id="qTipo">
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarEquipo('${entidadId}')">Guardar</button></div>
-    </div></div>`);
-}
-
-async function guardarEquipo(entidadId) {
-    const marca = document.getElementById('qMarca')?.value?.trim();
-    const modelo = document.getElementById('qModelo')?.value?.trim();
-    if (!marca || !modelo) { toast('⚠️ Complete marca y modelo'); return; }
-    const serie = document.getElementById('qSerie')?.value || '';
-    const tipo = document.getElementById('qTipo')?.value || '';
-    try {
-        await addDoc(collection(db, 'equipos'), { clienteId: entidadId, marca, modelo, serie, tipo });
-        closeModal(); await cargarDatos(); toast('✅ Activo guardado');
-    } catch(err) { toast('❌ Error: ' + err.message); }
-}
-
-function modalEditarEquipo(eid) {
-    const eq = getEq(eid); if(!eq) return;
-    showModal(`<div class="modal"><div class="modal-h"><h3>Editar activo</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <div class="fr"><div><label class="fl">Marca</label><input class="fi" id="eMarca" value="${eq.marca}"></div><div><label class="fl">Modelo</label><input class="fi" id="eModelo" value="${eq.modelo}"></div></div>
-        <label class="fl">Serie</label><input class="fi" id="eSerie" value="${eq.serie||''}">
-        <label class="fl">Tipo</label><input class="fi" id="eTipoEq" value="${eq.tipo||''}">
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarEquipo('${eid}')">Guardar</button></div>
-    </div></div>`);
-}
-
-async function actualizarEquipo(eid) {
-    try {
-        await updateDoc(doc(db,'equipos',eid), {
-            marca: document.getElementById('eMarca').value,
-            modelo: document.getElementById('eModelo').value,
-            serie: document.getElementById('eSerie').value,
-            tipo: document.getElementById('eTipoEq').value
-        });
-        closeModal(); await cargarDatos(); toast('✅ Activo actualizado');
-    } catch(err) { toast('❌ Error: '+err.message); }
-}
-
-function modalEliminarEquipo(eid) { if(!confirm('¿Eliminar este activo y sus servicios?')) return; eliminarEquipo(eid); }
-async function eliminarEquipo(eid) {
-    const ss = getServiciosEquipo(eid);
-    try { for(const s of ss) await deleteDoc(doc(db,'servicios',s.id)); await deleteDoc(doc(db,'equipos',eid)); await cargarDatos(); toast('🗑️ Activo eliminado'); } catch(err) { toast('❌ Error: '+err.message); }
-}
-
-// ===== MODULO COTIZACIONES =====
-function modalCotizaciones(eid) {
-    const e = getEq(eid); if(!e) return;
-    const cots = getCotizacionesEquipo(eid);
-    showModal(`<div class="modal modal-wide"><div class="modal-h"><h3>Cotizaciones - ${e.marca} ${e.modelo}</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        ${cots.length ? cots.map(c => `<div class="si" style="cursor:pointer;" onclick="modalEditarCotizacion('${c.id}')">
-            <div class="si-top"><span style="font-weight:700;">${c.numero ? 'Cot. '+c.numero : 'Sin número'}</span><span class="badge ${ESTADO_BADGE[c.estado]||'b-gray'}">${ESTADO_LABEL[c.estado]||c.estado}</span></div>
-            <div class="si-info">${c.proveedor||''} · ${c.descripcion||''}</div>
-            <div class="si-info">$${Number(c.monto||0).toLocaleString('es-CO')} (sin IVA)</div>
-            <div class="si-info" style="color:var(--hint);">${c.estado==='con_oc' ? `OC: ${fmtFecha(c.fechaOC)} · ${diasSinEntregar(c.fechaOC)} día(s) esperando` : ''}${c.estado==='subida' ? `Subida: ${fmtFecha(c.fechaSubida)}` : ''}${c.estado==='instalado' ? `Instalado: ${fmtFecha(c.fechaInstalado)}` : ''}${c.estado==='abierta' ? `Recibida: ${fmtFecha(c.fechaRecibida)}` : ''}</div>
-        </div>`).join('') : '<p class="cc-meta" style="text-align:center;color:var(--hint);">Sin cotizaciones registradas.</p>'}
-        <div class="modal-foot" style="justify-content:center;"><button class="btn btn-blue btn-full" onclick="modalNuevaCotizacion('${eid}')">+ Nueva cotización</button></div>
-    </div></div>`);
-}
-
-function modalNuevaCotizacion(eid) {
-    showModal(`<div class="modal"><div class="modal-h"><h3>Nueva cotización</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <label class="fl">Proveedor *</label><input class="fi" id="qcProveedor">
-        <label class="fl">N° de cotización</label><input class="fi" id="qcNumero">
-        <label class="fl">Descripción *</label><input class="fi" id="qcDescripcion">
-        <div class="fr"><div><label class="fl">Monto (sin IVA) *</label><input class="fi" id="qcMonto" type="number"></div>
-        <div><label class="fl">Fecha recibida *</label><input class="fi" id="qcFechaRecibida" type="date"></div></div>
-        <div class="modal-foot"><button class="btn btn-gray" onclick="modalCotizaciones('${eid}')">Cancelar</button><button class="btn btn-blue" onclick="guardarCotizacion('${eid}')">Guardar</button></div>
-    </div></div>`);
-}
-
-async function guardarCotizacion(eid) {
-    const proveedor = document.getElementById('qcProveedor')?.value?.trim();
-    const numero = document.getElementById('qcNumero')?.value?.trim() || '';
-    const descripcion = document.getElementById('qcDescripcion')?.value?.trim();
-    const monto = document.getElementById('qcMonto')?.value;
-    const fechaRecibida = document.getElementById('qcFechaRecibida')?.value;
-    if(!proveedor || !descripcion || !monto || !fechaRecibida) { toast('⚠️ Complete los campos obligatorios'); return; }
-    try {
-        await addDoc(collection(db,'cotizaciones'), { equipoId: eid, proveedor, numero, descripcion, monto: Number(monto), fechaRecibida, estado: 'abierta' });
-        await cargarDatos(); modalCotizaciones(eid); toast('✅ Cotización guardada');
-    } catch(err) { toast('❌ Error: '+err.message); }
-}
-
-function modalEditarCotizacion(qid) {
-    const c = cotizaciones.find(x => x.id === qid); if(!c) return;
-    const siguiente = ESTADO_SIGUIENTE[c.estado];
-    const fechasHtml = `
-        ${c.fechaRecibida ? `<div class="cc-row">Recibida: ${fmtFecha(c.fechaRecibida)}</div>` : ''}
-        ${c.fechaSubida ? `<div class="cc-row">Subida: ${fmtFecha(c.fechaSubida)}</div>` : ''}
-        ${c.fechaOC ? `<div class="cc-row">Orden de compra: ${fmtFecha(c.fechaOC)}</div>` : ''}
-        ${c.fechaInstalado ? `<div class="cc-row">Instalado: ${fmtFecha(c.fechaInstalado)}</div>` : ''}`;
-    const avanceHtml = siguiente ? `
-        <label class="fl">${siguiente==='instalado' ? 'Marcar como instalado' : 'Fecha de '+(siguiente==='subida'?'subida':'orden de compra')}</label>
-        ${siguiente!=='instalado' ? `<input class="fi" id="qcFechaAvance" type="date">` : ''}
-        <button class="btn btn-blue btn-full" style="margin-top:0.5rem;" onclick="avanzarEstadoCotizacion('${c.id}')">Avanzar a: ${ESTADO_LABEL[siguiente]}</button>` : '';
-    showModal(`<div class="modal"><div class="modal-h"><h3>${c.numero ? 'Cotización '+c.numero : 'Cotización'}</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <div class="cc-name">${c.proveedor}</div>
-        <div class="cc-row">${c.descripcion}</div>
-        <div class="cc-row">$${Number(c.monto||0).toLocaleString('es-CO')} (sin IVA)</div>
-        <span class="badge ${ESTADO_BADGE[c.estado]||'b-gray'}" style="margin:0.5rem 0;display:inline-block;">${ESTADO_LABEL[c.estado]||c.estado}</span>
-        ${fechasHtml}
-        <div style="margin-top:0.75rem;">${avanceHtml}</div>
-        <div class="modal-foot">${esAdmin()?`<button class="btn btn-red" onclick="eliminarCotizacion('${c.id}')">Eliminar</button>`:''}<button class="btn btn-gray" onclick="modalCotizaciones('${c.equipoId}')">Volver</button></div>
-    </div></div>`);
-}
-
-async function avanzarEstadoCotizacion(qid) {
-    const c = cotizaciones.find(x => x.id === qid); if(!c) return;
-    const siguiente = ESTADO_SIGUIENTE[c.estado]; if(!siguiente) return;
-    const data = { estado: siguiente };
-    if (siguiente !== 'instalado') {
-        const fecha = document.getElementById('qcFechaAvance')?.value;
-        if(!fecha) { toast('⚠️ Ingrese la fecha'); return; }
-        if (siguiente === 'subida') data.fechaSubida = fecha;
-        if (siguiente === 'con_oc') data.fechaOC = fecha;
-    } else {
-        data.fechaInstalado = new Date().toISOString().slice(0,10);
-    }
-    try { await updateDoc(doc(db,'cotizaciones',qid), data); await cargarDatos(); modalEditarCotizacion(qid); toast('✅ Estado actualizado'); }
-    catch(err) { toast('❌ Error: '+err.message); }
-}
-
-async function eliminarCotizacion(qid) {
-    if(!confirm('¿Eliminar esta cotización?')) return;
-    const c = cotizaciones.find(x => x.id === qid); const eid = c?.equipoId;
-    try { await deleteDoc(doc(db,'cotizaciones',qid)); await cargarDatos(); if(eid) modalCotizaciones(eid); toast('🗑️ Cotización eliminada'); }
-    catch(err) { toast('❌ Error: '+err.message); }
-}
-
-function exportarCotizacionesEntidad(entidadId) {
-    const ent = getEntidad(entidadId); if(!ent) return;
-    const cots = ent.tipoEntidad === 'tienda' ? getCotizacionesTienda(entidadId) : getCotizacionesCliente(entidadId);
-    if(!cots.length){ toast('⚠️ Sin cotizaciones para exportar'); return; }
-    const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
-    const header = ['CEDI/Tienda','Activo','Marca','Modelo','Serie','N Cotizacion','Proveedor','Descripcion','Monto sin IVA','Estado','Fecha Recibida','Fecha Subida','Fecha OC','Fecha Instalado','Dias sin entregar'];
-    const rows = cots.map(c => {
-        const e = getEq(c.equipoId);
-        return [
-            ent.nombre||'',
-            `${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}`.trim(),
-            e?.marca||'', e?.modelo||'', e?.serie||'',
-            c.numero||'', c.proveedor||'', c.descripcion||'', c.monto||0,
-            ESTADO_LABEL[c.estado]||c.estado,
-            c.fechaRecibida?fmtFecha(c.fechaRecibida):'',
-            c.fechaSubida?fmtFecha(c.fechaSubida):'',
-            c.fechaOC?fmtFecha(c.fechaOC):'',
-            c.fechaInstalado?fmtFecha(c.fechaInstalado):'',
-            c.estado==='con_oc'?diasSinEntregar(c.fechaOC):''
-        ].map(esc).join(',');
-    });
-    const csv = '\uFEFF' + [header.map(esc).join(','), ...rows].join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `Cotizaciones_${ent.nombre}_${new Date().toISOString().slice(0,10)}.csv`; a.click();
-    URL.revokeObjectURL(url);
-    toast('📊 Excel descargado');
-}
-
-// FIX: font-size de fecha corregido de 2rem a 0.82rem
-function renderHistorial() {
-    const e = getEq(selectedEquipoId); if(!e) { goTo('clientes'); return ''; }
-    const ent = getEntidad(e.clienteId); const nombreEnt = ent ? ent.nombre : 'Sin entidad';
-    const ss = getServiciosEquipo(e.id).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
-    // Volver al detalle correcto según tipo de entidad
-    const backTarget = ent?.tipoEntidad === 'tienda' ? `goTo('detalleTienda','${e.clienteId}')` : `goTo('detalleCliente','${e.clienteId}')`;
-    return `<div class="page"><div class="det-hdr"><button class="back" onclick="${backTarget}">← Volver</button><div><div class="ec-name">${e.marca} ${e.tipo||''} ${e.modelo}</div><div class="ec-meta">${nombreEnt}</div></div></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;gap:6px;">
-            <span style="font-weight:700;">Historial (${ss.length})</span>
-            <div style="display:flex;gap:6px;"><button class="btn btn-gray btn-sm" onclick="generarInformePDF('${e.id}')">📄 PDF</button><button class="btn btn-gray btn-sm" onclick="exportarHistorialExcel('${e.id}')">📊 Excel</button></div>
+    return `<div class="page">
+        <div class="det-hdr">
+            <button class="back" onclick="goTo('detalle','${c?.id}')">← ${c?.nombre||'Volver'}</button>
+            <div>
+                <div class="cc-name">${t.nombre}</div>
+                <div class="ec-meta">📍 ${t.municipio||''}, ${t.departamento||''} · Cód: ${t.codigo}</div>
+            </div>
         </div>
-        ${ss.map(s=>`<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span style="font-size:0.82rem;color:var(--hint);">${fmtFecha(s.fecha)}</span></div><div class="si-info">🔧 ${s.tecnico}</div>${s.estadoReparacion?`<div class="si-info"><strong>Estado:</strong> ${s.estadoReparacion}</div>`:''}<div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}<div class="fotos-strip">${(s.fotos||[]).map(f=>`<img class="fthumb" src="${f}" loading="lazy">`).join('')}</div><div class="si-top" style="justify-content:flex-end;margin-top:4px;">${puedeEditar(s.tecnico)?`<button class="ib" onclick="modalEditarServicio('${s.id}')">✏️</button>`:''}${esAdmin()?`<button class="ib" onclick="eliminarServicio('${s.id}')">🗑️</button>`:''}</div></div>`).join('')}
+        ${t.latitud ? `<div style="margin-bottom:.5rem;"><a class="map-link" href="https://maps.google.com/?q=${t.latitud},${t.longitud}" target="_blank">🗺️ Ver ubicación en Google Maps</a></div>` : ''}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.65rem;">
+            <span style="font-weight:700;">Activos (${eqs.length})</span>
+            <div style="display:flex;gap:6px;">
+                <button class="btn btn-gray btn-sm" onclick="descargarHistorialTienda('${t.id}')">📥 Historial</button>
+                ${esAdmin() || sesionActual ? `<button class="btn btn-blue btn-sm" onclick="modalNuevoEquipo('${c?.id}','${t.id}')">+ Activo</button>` : ''}
+            </div>
+        </div>
+        ${eqs.map(e => {
+            const numSrv = getServiciosEquipo(e.id).length;
+            return `<div class="ec">
+                <div style="display:flex;justify-content:space-between;">
+                    <div>
+                        <div class="ec-name">${e.nombre||e.tipo||e.marca||'Activo'}</div>
+                        ${e.descripcion ? `<div class="ec-meta">${e.descripcion}</div>` : ''}
+                        <div class="ec-meta" style="color:${e.estado==='Operativo'?'#16a34a':e.estado==='Fuera de servicio'?'#dc2626':'#f59e0b'};">
+                            ● ${e.estado||'Sin estado'}
+                        </div>
+                        <div class="ec-meta">${numSrv} incidencia(s)</div>
+                    </div>
+                    ${esAdmin() ? `<div><button class="ib" onclick="modalEditarEquipo('${e.id}')">✏️</button><button class="ib" onclick="modalEliminarEquipo('${e.id}')">🗑️</button></div>` : ''}
+                </div>
+                <div class="ec-btns">
+                    <button class="ab" onclick="goTo('historial','${c?.id}','${t.id}','${e.id}')">📋 Incidencias</button>
+                    <button class="ab" onclick="modalNuevaIncidencia('${e.id}')">➕ Nueva incidencia</button>
+                    <button class="ab" onclick="generarInformePDF('${e.id}')">📄 PDF</button>
+                    <button class="ab" onclick="modalQR('${e.id}')">📱 QR</button>
+                </div>
+            </div>`;
+        }).join('')}
     </div>`;
 }
 
-// NUEVO: exportar historial completo del equipo a Excel (.csv descargable como xlsx)
-function exportarHistorialExcel(eid) {
-    const e = getEq(eid); if(!e) return;
-    const ent = getEntidad(e.clienteId);
-    const ss = getServiciosEquipo(eid).sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
-    if(!ss.length){ toast('⚠️ Sin servicios para exportar'); return; }
-    const esc = v => `"${String(v||'').replace(/"/g,'""')}"`;
-    const header = ['Fecha','Tipo','Tecnico','Estado','Descripcion','Proximo Mantenimiento','CEDI/Tienda','Activo','Marca','Modelo','Serie'];
-    const rows = ss.map(s => [
-        fmtFecha(s.fecha),
-        s.tipo||'',
-        s.tecnico||'',
-        s.estadoReparacion||'',
-        s.descripcion||'',
-        s.proximoMantenimiento ? fmtFecha(s.proximoMantenimiento) : '',
-        ent?.nombre||'',
-        `${e.marca} ${e.tipo||''} ${e.modelo}`.trim(),
-        e.marca||'',
-        e.modelo||'',
-        e.serie||''
-    ].map(esc).join(','));
-    const csv = '\uFEFF' + [header.map(esc).join(','), ...rows].join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+window.descargarHistorialTienda = (tid) => {
+    const t   = getTienda(tid);
+    const eqs = getEquiposTienda(tid);
+    let csv   = 'ID MTTO,Fecha,Tipo,Técnico,Aprobada\n';
+    eqs.forEach(e => getServiciosEquipo(e.id).forEach(s => {
+        csv += `${s.idMtto||''},${s.fecha||''},${s.tipo||''},${s.tecnico||''},${s.aprobado?'Sí':'No'}\n`;
+    }));
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `Historial_${e.marca}_${e.modelo}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+    a.download = `Historial_${t?.nombre||tid}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
-    toast('📊 Excel descargado');
+};
+
+function renderHistorial() {
+    const e = getEq(selectedEquipoId);
+    if (!e) { goTo('clientes'); return ''; }
+    const c = getCl(e.clienteId);
+    const ss = getServiciosEquipo(e.id).sort((a,b) => new Date(b.fecha)-new Date(a.fecha));
+    return `<div class="page"><div class="det-hdr"><button class="back" onclick="goTo('detalle-tienda','${e.clienteId}','${e.tiendaId||selectedTiendaId}')">← Volver</button><div><div class="ec-name">${e.nombre||e.tipo||e.marca||'Activo'}</div><div class="ec-meta">${e.ubicacion} · ${c?.nombre}</div></div></div><div style="margin-bottom:2rem;"><span style="font-weight:700;">Historial (${ss.length})</span></div>${ss.map(s => `<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div><div class="si-info">🔧 ${s.tecnico}</div>${s.funcionarioNombre ? '<div class="si-info">✍️ Recibido por: <strong>'+s.funcionarioNombre+'</strong>'+(s.funcionarioId?' · '+s.funcionarioId:'')+'</div>' : ''}<div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento ? `<div class="si-info" style="color:#C9A84C;">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>` : ''}<div class="fotos-strip">${(s.fotos||[]).map(f => `<img class="fthumb" src="${f}" loading="lazy">`).join('')}</div><div class="si-top" style="justify-content:flex-end;margin-top:4px;">${puedeEditar(s.tecnico) ? `<button class="ib" onclick="modalEditarServicio('${s.id}')">✏️</button>` : ''}${esAdmin() ? `<button class="ib" onclick="eliminarServicio('${s.id}')">🗑️</button>` : ''}</div></div>`).join('')}</div>`;
 }
 
-// FIX: compresión de imagen antes de convertir a base64 (max 800px, calidad 0.7)
-function comprimirFoto(file) {
-    return new Promise((resolve) => {
+function renderEquipos() {
+    return `<div class="page"><div class="sec-head"><h2>Activos (${equipos.length})</h2></div><input class="search" placeholder="🔍 Buscar..." oninput="filtrarEquipos(this.value)" id="searchEq"><div id="equiposGrid">${equipos.map(e => { const c = getCl(e.clienteId); const esD1 = esClienteD1(e.clienteId); return `<div class="ec" data-search="${(e.marca+e.modelo+(c?.nombre||'')).toLowerCase()}"><div class="ec-name">${e.marca} ${e.modelo}</div><div class="ec-meta">👤 ${c?.nombre||'Sin cliente'} · 📍 ${e.ubicacion}</div><div class="ec-btns"><button class="ab" onclick="goTo('historial','${e.clienteId}','${e.id}')">📋 Servicios</button>${esD1 ? `<button class="ab" onclick="modalActaD1('${e.id}')">➕ Nuevo D1</button>` : `<button class="ab" onclick="modalNuevoServicio('${e.id}')">➕ Nuevo</button>`}<button class="ab" onclick="generarInformePDF('${e.id}')">📄 PDF</button></div></div>`; }).join('')}</div></div>`;
+}
+
+function filtrarEquipos(v) { document.querySelectorAll('#equiposGrid .ec').forEach(c => { c.style.display = (c.dataset.search||'').includes(v.toLowerCase()) ? '' : 'none'; }); }
+
+function renderServicios() {
+    const años = [...new Set(servicios.map(s=>s.fecha?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a);
+    const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    return `<div class="page"><div class="sec-head"><h2>Servicios</h2></div><div class="filtros"><select class="fi" id="fAnio"><option value="">Todos los años</option>${años.map(a=>`<option>${a}</option>`).join('')}</select><select class="fi" id="fMes"><option value="">Todos los meses</option>${meses.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select><select class="fi" id="fTipo"><option value="">Todos los tipos</option><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select><select class="fi" id="fCliente"><option value="">Todos los clientes</option>${clientes.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select><select class="fi" id="fTecnico"><option value="">Todos los tecnicos</option>${tecnicos.map(t=>`<option>${t.nombre}</option>`).join('')}</select><button class="btn btn-blue btn-full" onclick="aplicarFiltros()">Aplicar</button><button class="btn btn-gray btn-full" onclick="limpiarFiltros()">Limpiar</button></div><div id="listaServicios"></div></div>`;
+}
+
+function aplicarFiltros() {
+    const anio = document.getElementById('fAnio')?.value||'', mes = document.getElementById('fMes')?.value||'', tipo = document.getElementById('fTipo')?.value||'', cid = document.getElementById('fCliente')?.value||'', tec = document.getElementById('fTecnico')?.value||'';
+    let filtrados = [...servicios].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+    if (anio) filtrados = filtrados.filter(s=>s.fecha?.startsWith(anio));
+    if (mes) filtrados = filtrados.filter(s=>s.fecha?.slice(5,7)===mes);
+    if (tipo) filtrados = filtrados.filter(s=>s.tipo===tipo);
+    if (cid) filtrados = filtrados.filter(s=>getEquiposCliente(cid).some(e=>e.id===s.equipoId));
+    if (tec) filtrados = filtrados.filter(s=>s.tecnico===tec);
+    const el = document.getElementById('listaServicios');
+    if (!el) return;
+    if (!filtrados.length) { el.innerHTML='<p class="cc-meta" style="text-align:center;">Sin resultados.</p>'; return; }
+    el.innerHTML = filtrados.map(s => { const e = getEq(s.equipoId); const c = getCl(e?.clienteId); return `<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div><div class="si-info">👤 ${c?.nombre||'N/A'} · ${e?.marca||''} ${e?.modelo||''}</div><div class="si-info">📍 ${e?.ubicacion||''} · 🔧 ${s.tecnico}</div><div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:#C9A84C;">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`; }).join('');
+}
+
+function limpiarFiltros() { ['fAnio','fMes','fTipo','fCliente','fTecnico'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; }); aplicarFiltros(); }
+
+function renderMantenimientos() {
+    const MESES = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+    const año = new Date().getFullYear();
+    const mant = servicios.filter(s=>s.proximoMantenimiento);
+    return `<div class="page"><div class="sec-head"><h2>Agenda ${año}</h2></div><div class="tbl-wrap"><table><thead><tr><th>Mes</th><th>Fecha</th><th>Cliente</th><th>Activo</th><th></th></tr></thead><tbody>${MESES.map((mes,idx) => { const mp = String(idx+1).padStart(2,'0'); const lista = mant.filter(m=>m.proximoMantenimiento?.startsWith(`${año}-${mp}`)); if (!lista.length) return `<tr><td style="color:var(--hint);">${mes}</td><td colspan="4" style="color:#cbd5e1;">—</td></tr>`; return lista.map((m,i) => { const e = getEq(m.equipoId); const c = getCl(e?.clienteId); return `<tr>${i===0?`<td rowspan="${lista.length}" style="font-weight:700;background:var(--bg2);">${mes}</td>`:''}<td>${fmtFecha(m.proximoMantenimiento)}</td><td>${c?.nombre||'N/A'}</td><td>${e?`${e.marca} ${e.modelo}`:'N/A'}</td><td><button class="rec-btn" onclick="modalRecordar('${e?.clienteId}','${e?.id}','${m.proximoMantenimiento}')">📱</button></td></tr>`; }).join(''); }).join('')}</tbody></table></div></div>`;
+}
+
+function renderTecnicos() {
+    return `<div class="page"><div class="sec-head"><h2>Tecnicos (${tecnicos.length})</h2>${esAdmin() ? `<button class="btn btn-blue btn-sm" onclick="modalNuevoTecnico()">+ Nuevo</button>` : ''}</div>${tecnicos.map(t => { const esps = (t.especialidades||[]).map(id => ESPECIALIDADES.find(e=>e.id===id)?.label||id); const isActive = sesionActual && sesionActual.id === t.id; return `<div class="ec" style="${isActive ? 'border:2px solid #10b981;' : ''}"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${t.nombre} ${isActive ? '<span style="background:#10b981;color:white;font-size:0.6rem;padding:2px 6px;border-radius:10px;margin-left:5px;">✓ Activo</span>' : ''}</div><div class="ec-meta">${t.tipoDoc}</div><div class="ec-meta">${t.cargo}</div><div class="ec-meta">📞 ${t.telefono}</div></div><div><span class="tc-rol-badge ${t.rol==='admin'?'rol-admin':'rol-tec'}">${t.rol==='admin'?'Admin':'Tecnico'}</span>${esAdmin() && !isActive ? `<div><button class="ib" onclick="modalEditarTecnico('${t.id}')">✏️</button><button class="ib" onclick="eliminarTecnico('${t.id}')">🗑️</button></div>` : ''}</div></div><div>${esps.map(e=>`<span class="esp-chip">${e}</span>`).join('')}</div><div class="ec-meta">📍 ${t.region||'Sin region'}</div>${!isActive ? `<button class="btn btn-blue btn-sm btn-full" onclick="abrirLogin('${t.id}')">🔑 Ingresar como ${t.nombre.split(' ')[0]}</button>` : `<button class="btn btn-gray btn-sm btn-full" onclick="cerrarSesion()">🚪 Cerrar sesión</button>`}</div>`; }).join('')}</div>`;
+}
+
+// ============================================
+// LOGIN
+// ============================================
+let mlPinActual = '';
+
+function abrirLogin(tid) {
+    const t = getTec(tid);
+    mlPinActual = '';
+    showModal(`<div class="modal" style="max-width:320px;"><div class="modal-h"><h3>🔑 Ingresar</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div style="font-weight:700;">${t.nombre}</div><div class="ec-meta">${t.tipoDoc}</div><label class="fl">Cedula</label><input class="fi" id="mlCedula" type="number"><label class="fl">Clave (4 digitos)</label><div class="pin-display"><div class="pin-digit" id="mlpd0"></div><div class="pin-digit" id="mlpd1"></div><div class="pin-digit" id="mlpd2"></div><div class="pin-digit" id="mlpd3"></div></div><div class="numpad">${[1,2,3,4,5,6,7,8,9].map(n=>`<div class="num-btn" onclick="mlPin('${tid}',${n})">${n}</div>`).join('')}<div class="num-btn del" onclick="mlDel()">⌫</div><div class="num-btn zero" onclick="mlPin('${tid}',0)">0</div><div class="num-btn ok" onclick="mlLogin('${tid}')">✓</div></div><div id="mlMsg"></div><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="mlLogin('${tid}')">Ingresar</button></div></div></div>`);
+    mlUpdateDisplay();
+}
+function mlPin(tid, n) { if (mlPinActual.length >= 4) return; mlPinActual += String(n); mlUpdateDisplay(); if (mlPinActual.length === 4) mlLogin(tid); }
+function mlDel() { mlPinActual = mlPinActual.slice(0,-1); mlUpdateDisplay(); }
+function mlUpdateDisplay() { for (let i=0;i<4;i++) { const d = document.getElementById('mlpd'+i); if(!d) continue; d.className='pin-digit'; if(i<mlPinActual.length){ d.textContent='●'; d.classList.add('filled'); } else if(i===mlPinActual.length){ d.textContent='_'; d.classList.add('active'); } else { d.textContent=''; } } }
+function mlLogin(tid) {
+    const t = getTec(tid);
+    const cedula = document.getElementById('mlCedula')?.value?.trim();
+    const msg = document.getElementById('mlMsg');
+    if (!cedula) { if(msg) msg.innerHTML='<div class="login-warn">⚠️ Cedula requerida</div>'; return; }
+    if (mlPinActual.length<4) { if(msg) msg.innerHTML='<div class="login-warn">⚠️ Clave de 4 digitos</div>'; return; }
+    if (t.cedula !== cedula || t.clave !== mlPinActual) { if(msg) msg.innerHTML='<div class="login-error">❌ Credenciales incorrectas</div>'; mlPinActual=''; mlUpdateDisplay(); return; }
+    sesionActual = t;
+    mlPinActual = '';
+    closeModal();
+    actualizarTopbar();
+    currentView='panel';
+    renderView();
+    toast(`✅ Bienvenido, ${t.nombre.split(' ')[0]}`);
+}
+
+// ============================================
+// MODAL RECORDAR
+// ============================================
+function modalRecordar(clienteId, equipoId, fecha) {
+    const e = getEq(equipoId);
+    const c = getCl(clienteId);
+    const fechaF = new Date(fecha + 'T12:00:00').toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+    const esJMC = esClienteJMC(clienteId);
+    let tel, destinatario, msg;
+    if (esJMC) {
+        const sap = e?.ubicacion;
+        const tienda = getTiendaJMC(sap);
+        if (tienda) {
+            tel = tienda.telefono;
+            destinatario = `${tienda.coordinador} · SAP ${sap}`;
+            msg = `Hola *${tienda.coordinador}*, recordatorio: activo *${e?.marca} ${e?.modelo}* tienda *${tienda.tienda} (SAP ${sap})* requiere mantenimiento el *${fechaF}*. Confirmar visita. JD Arquisoluciones S.A.S 📞 3105533937`;
+        } else { tel = c?.telefono; destinatario = c?.nombre; msg = `Hola *${c?.nombre}*, recordatorio: activo *${e?.marca} ${e?.modelo}* requiere mantenimiento el *${fechaF}*. JD Arquisoluciones S.A.S 📞 3105533937`; }
+    } else { tel = c?.telefono; destinatario = c?.nombre; msg = `Hola *${c?.nombre}*, recordatorio: activo *${e?.marca} ${e?.modelo}* requiere mantenimiento el *${fechaF}*. JD Arquisoluciones S.A.S 📞 3105533937`; }
+    showModal(`<div class="modal"><div class="modal-h"><h3>📱 Recordatorio WhatsApp</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div class="ec-meta">Para <strong>${destinatario}</strong> · 📞 ${tel}</div><div class="wa-bubble">${msg}</div><textarea class="fi" id="waMsgEdit" rows="4">${msg}</textarea><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-wa" onclick="enviarWhatsApp('${tel}')">📱 Abrir WhatsApp</button></div></div></div>`);
+}
+function enviarWhatsApp(tel) { const msg = document.getElementById('waMsgEdit')?.value||''; const telLimpio = '57' + tel.replace(/\D/g,''); window.open(`https://wa.me/${telLimpio}?text=${encodeURIComponent(msg)}`, '_blank'); closeModal(); toast('📱 WhatsApp abierto'); }
+
+// ============================================
+// MANEJO DE FOTOS
+// ============================================
+async function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = ev => {
+        reader.onload = (e) => {
             const img = new Image();
             img.onload = () => {
                 const MAX = 800;
-                let w = img.width, h = img.height;
-                if (w > MAX || h > MAX) {
-                    if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-                    else { w = Math.round(w * MAX / h); h = MAX; }
-                }
+                const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+                const w = Math.round(img.width * scale);
+                const h = Math.round(img.height * scale);
+                const canvas = document.createElement('canvas');
+                canvas.width = w; canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL('image/jpeg', 0.72));
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+async function comprimirImagenD1(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+                const MAX = 600;
+                const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+                const w = Math.round(img.width * scale);
+                const h = Math.round(img.height * scale);
                 const canvas = document.createElement('canvas');
                 canvas.width = w; canvas.height = h;
                 canvas.getContext('2d').drawImage(img, 0, 0, w, h);
                 resolve(canvas.toDataURL('image/jpeg', 0.7));
             };
-            img.src = ev.target.result;
+            img.onerror = reject;
+            img.src = e.target.result;
         };
+        reader.onerror = reject;
         reader.readAsDataURL(file);
     });
 }
 
-function onTipoChange() {
-    const tipo = document.getElementById('sTipo')?.value;
-    const mantBox = document.getElementById('mantBox');
-    const reparacionBox = document.getElementById('reparacionBox');
-    if(mantBox) mantBox.classList.toggle('hidden', tipo !== 'Mantenimiento');
-    if(reparacionBox) reparacionBox.classList.toggle('hidden', tipo !== 'Reparacion');
-}
-
-function previewFoto(input,idx) {
-    if(!input.files||!input.files[0]) return;
-    fotosNuevas[idx]=input.files[0];
-    const reader=new FileReader();
-    reader.onload=e=>{
-        const slot=document.getElementById('fslot'+idx);
-        if(slot) slot.innerHTML=`<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;"><button class="fslot-del" onclick="borrarFoto(event,${idx})">✕</button><input type="file" id="finput${idx}" accept="image/*" style="display:none" onchange="previewFoto(this,${idx})">`;
-    };
+function previewFoto(input, idx, isD1 = false) {
+    if (!input.files || !input.files[0]) return;
+    if (isD1) { fotosD1[idx] = input.files[0]; } else { fotosNuevas[idx] = input.files[0]; }
+    const reader = new FileReader();
+    reader.onload = e => { const slot = document.getElementById(`fslot${idx}${isD1 ? '_d1' : ''}`); if (slot) slot.innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;"><button class="fslot-del" onclick="borrarFoto(event,${idx}, ${isD1})">✕</button><input type="file" id="finput${idx}${isD1 ? '_d1' : ''}" accept="image/*" style="display:none" onchange="previewFoto(this,${idx}, ${isD1})">`; };
     reader.readAsDataURL(input.files[0]);
 }
-
-function borrarFoto(e,idx) {
+function borrarFoto(e, idx, isD1 = false) {
     e.stopPropagation();
-    fotosNuevas[idx]=null;
-    const slot=document.getElementById('fslot'+idx);
-    if(slot){
-        slot.innerHTML=`<div class="fslot-plus">+</div><div class="fslot-lbl">Foto ${idx+1}</div><input type="file" id="finput${idx}" accept="image/*" style="display:none" onchange="previewFoto(this,${idx})">`;
-        slot.onclick=()=>document.getElementById('finput'+idx).click();
+    if (isD1) {
+        fotosD1[idx] = null;
+        const slot = document.getElementById(`fslot${idx}_d1`);
+        if (slot) { slot.innerHTML = `<div class="fslot-plus">+</div><div class="fslot-lbl">${idx === 0 ? 'ANTES' : 'DESPUÉS'}</div><input type="file" id="finput${idx}_d1" accept="image/*" style="display:none" onchange="previewFoto(this,${idx}, true)">`; slot.onclick = () => document.getElementById(`finput${idx}_d1`).click(); }
+    } else {
+        fotosNuevas[idx] = null;
+        const slot = document.getElementById(`fslot${idx}`);
+        if (slot) { slot.innerHTML = `<div class="fslot-plus">+</div><div class="fslot-lbl">Foto ${idx+1}</div><input type="file" id="finput${idx}" accept="image/*" style="display:none" onchange="previewFoto(this,${idx})">`; slot.onclick = () => document.getElementById(`finput${idx}`).click(); }
     }
 }
 
-function modalNuevoServicio(eid) {
-    if(!sesionActual){ toast('🔑 Inicia sesion para continuar'); return; }
-    const e=getEq(eid); const ent=getEntidad(e.clienteId); const hoy=new Date().toISOString().split('T')[0];
-    fotosNuevas=[null,null,null]; _servicioEidActual=eid;
-    showModal(`<div class="modal" onclick="event.stopPropagation()"><div class="modal-h"><h3>Nuevo servicio</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <div style="background:var(--bg2);padding:0.55rem;border-radius:8px;margin-bottom:0.65rem;"><strong>${ent?.nombre||'Sin entidad'}</strong><br><span style="font-size:0.75rem;">${e?.marca} ${e?.tipo||''} ${e?.modelo}</span></div>
-        <div class="fr"><div><label class="fl">Tipo *</label><select class="fi" id="sTipo" onchange="onTipoChange()"><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select></div>
-        <div><label class="fl">Fecha *</label><input class="fi" type="date" id="sFecha" value="${hoy}"></div></div>
-        <label class="fl">Tecnico</label><input class="fi" id="sTecnico" value="${sesionActual?.nombre||''}" readonly>
-        <label class="fl">Diagnostico / Descripcion *</label><textarea class="fi" id="sDesc" rows="3" placeholder="Trabajo realizado..."></textarea>
-        <div class="mant-box hidden" id="mantBox"><label class="fl">📅 Proximo mantenimiento</label><input class="fi" type="date" id="proxFecha"></div>
-        <div class="reparacion-box hidden" id="reparacionBox"><label class="fl">🔧 Estado posterior a la reparación</label><select class="fi" id="estadoReparacion"><option value="OPERATIVO">OPERATIVO</option><option value="FUERA DE SERVICIO">FUERA DE SERVICIO</option><option value="DAR DE BAJA">DAR DE BAJA</option></select></div>
-        <label class="fl">📷 Fotos (max 3)</label><div class="foto-row">${[0,1,2].map(i=>`<div style="flex:1;"><div class="fslot" id="fslot${i}" onclick="document.getElementById('finput${i}').click()"><div class="fslot-plus">+</div><div class="fslot-lbl">Foto ${i+1}</div><input type="file" id="finput${i}" accept="image/*" style="display:none" onchange="previewFoto(this,${i})"></div></div>`).join('')}</div>
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" id="btnGuardarServicio" onclick="guardarServicio('${eid}')">💾 Guardar</button></div>
-    </div></div>`);
-    onTipoChange();
-}
-
-// FIX: botón bloqueado durante guardado para evitar duplicados; fotos comprimidas
+// ============================================
+// MODAL NUEVO SERVICIO NORMAL (NO D1)
+// ============================================
 async function guardarServicio(eid) {
     const desc = document.getElementById('sDesc')?.value?.trim();
     if(!desc){ toast('⚠️ Ingresa el diagnostico'); return; }
     const tipo = document.getElementById('sTipo').value;
     const fecha = document.getElementById('sFecha').value;
-    if(!fecha){ toast('⚠️ Selecciona la fecha'); return; }
     const prox = tipo === 'Mantenimiento' ? (document.getElementById('proxFecha')?.value || null) : null;
-    const estadoRep = tipo === 'Reparacion' ? (document.getElementById('estadoReparacion')?.value || null) : null;
-
-    // Bloquear botón para evitar doble guardado
-    const btn = document.getElementById('btnGuardarServicio');
-    if(btn) { btn.disabled = true; btn.textContent = '⏳ Guardando...'; }
-
-    // FIX: comprimir fotos antes de subir
     const fotosBase64 = [];
-    for(let i = 0; i < fotosNuevas.length; i++) {
-        if(fotosNuevas[i]) fotosBase64.push(await comprimirFoto(fotosNuevas[i]));
-    }
-
+    for (let i = 0; i < fotosNuevas.length; i++) { if (fotosNuevas[i]) fotosBase64.push(await fileToBase64(fotosNuevas[i])); }
     try {
-        await addDoc(collection(db,'servicios'), {
-            equipoId: eid, tipo, fecha,
-            tecnico: sesionActual?.nombre || '',
-            descripcion: desc,
-            proximoMantenimiento: prox,
-            fotos: fotosBase64,
-            estadoReparacion: estadoRep
-        });
-        closeModal();
-        await cargarDatos();
-        goTo('historial', null, eid);
-        toast('✅ Servicio guardado con ' + fotosBase64.length + ' foto(s)');
-    } catch(err) {
-        if(btn) { btn.disabled = false; btn.textContent = '💾 Guardar'; }
-        toast('❌ Error: ' + err.message);
-    }
+        await addDoc(collection(db, 'servicios'), { equipoId: eid, tipo, fecha, tecnico: sesionActual?.nombre || '', descripcion: desc, proximoMantenimiento: prox, fotos: fotosBase64 });
+        closeModal(); await cargarDatos(); const e = getEq(eid); if(e) goTo('historial', e.clienteId, eid); toast('✅ Servicio guardado con ' + fotosBase64.length + ' foto(s)');
+    } catch(err) { toast('❌ Error: ' + err.message); }
 }
-
-// FIX: modalEditarServicio ahora incluye estadoReparacion y lógica condicional
+function onTipoChange() { const tipo = document.getElementById('sTipo')?.value; const box = document.getElementById('mantBox'); if (box) box.classList.toggle('hidden', tipo !== 'Mantenimiento'); }
+function modalNuevoServicio(eid) {
+    if (!sesionActual) { toast('🔑 Inicia sesion para continuar'); return; }
+    const e = getEq(eid); const c = getCl(e?.clienteId); const hoy = new Date().toISOString().split('T')[0];
+    const esJMC = esClienteJMC(e?.clienteId); const esRO = esClienteRO(e?.clienteId);
+    fotosNuevas = [null, null, null]; _servicioEidActual = eid;
+    const tiendaJMC = esJMC ? getTiendaJMC(e?.ubicacion) : null;
+    showModal(`<div class="modal" onclick="event.stopPropagation()"><div class="modal-h"><h3>Nuevo servicio</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div style="background:var(--bg2);padding:0.55rem;border-radius:8px;margin-bottom:0.65rem;"><strong>${c?.nombre}</strong><br><span style="font-size:0.75rem;">${e?.marca} ${e?.modelo} · 📍 ${e?.ubicacion}</span>${tiendaJMC ? `<br><span style="font-size:0.72rem;color:var(--green);">🏪 ${tiendaJMC.tienda} · ${tiendaJMC.ciudad}</span>` : ''}</div><div class="fr"><div><label class="fl">Tipo *</label><select class="fi" id="sTipo" onchange="onTipoChange()"><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select></div><div><label class="fl">Fecha *</label><input class="fi" type="date" id="sFecha" value="${hoy}"></div></div><label class="fl">Tecnico</label><input class="fi" id="sTecnico" value="${sesionActual?.nombre||''}" readonly>${esJMC ? `<div style="background:#f5f3ff;border-radius:10px;padding:0.65rem;margin-top:0.65rem;display:flex;justify-content:space-between;align-items:center;"><span style="color:#5b21b6;">📋 Informe Jeronimo Martins</span><button class="btn btn-sm" style="background:#7c3aed;color:white;" onclick="modalInformeJMC('${eid}')">Abrir</button></div>` : ''}${esRO ? `<div style="background:#e8f4fd;border-radius:10px;padding:0.65rem;margin-top:0.65rem;display:flex;justify-content:space-between;align-items:center;"><span style="color:#1565c0;">📋 Informe KRYOTEC SAS</span><button class="btn btn-sm" style="background:#1976d2;color:white;" onclick="modalInformeRO('${eid}')">Abrir</button></div>` : ''}<label class="fl">Diagnostico / Descripcion *</label><textarea class="fi" id="sDesc" rows="3" placeholder="Trabajo realizado..."></textarea><div class="mant-box hidden" id="mantBox"><label class="fl">📅 Proximo mantenimiento</label><input class="fi" type="date" id="proxFecha"></div><label class="fl">📷 Fotos (max 3)</label><div class="foto-row">${[0,1,2].map(i => `<div style="flex:1;"><div class="fslot" id="fslot${i}" onclick="document.getElementById('finput${i}').click()"><div class="fslot-plus">+</div><div class="fslot-lbl">Foto ${i+1}</div><input type="file" id="finput${i}" accept="image/*" style="display:none" onchange="previewFoto(this,${i})"></div></div>`).join('')}</div><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarServicio('${eid}')">💾 Guardar</button></div></div></div>`);
+    onTipoChange();
+}
 function modalEditarServicio(sid) {
-    const s = servicios.find(x=>x.id===sid); if(!s) return;
-    showModal(`<div class="modal"><div class="modal-h"><h3>Editar servicio</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
-        <div class="fr"><div><label class="fl">Tipo</label><select class="fi" id="esTipo" onchange="onEditTipoChange()">
-            <option ${s.tipo==='Mantenimiento'?'selected':''}>Mantenimiento</option>
-            <option ${s.tipo==='Reparacion'?'selected':''}>Reparacion</option>
-            <option ${s.tipo==='Instalacion'?'selected':''}>Instalacion</option>
-        </select></div>
-        <div><label class="fl">Fecha</label><input class="fi" type="date" id="esFecha" value="${s.fecha}"></div></div>
-        <label class="fl">Diagnostico</label><textarea class="fi" id="esDesc" rows="3">${s.descripcion}</textarea>
-        <div id="esMantBox" style="${s.tipo==='Mantenimiento'?'':'display:none'}"><label class="fl">Proximo mantenimiento</label><input class="fi" type="date" id="esProx" value="${s.proximoMantenimiento||''}"></div>
-        <div id="esRepBox" style="${s.tipo==='Reparacion'?'':'display:none'}"><label class="fl">Estado posterior</label><select class="fi" id="esEstado">
-            <option value="OPERATIVO" ${s.estadoReparacion==='OPERATIVO'?'selected':''}>OPERATIVO</option>
-            <option value="FUERA DE SERVICIO" ${s.estadoReparacion==='FUERA DE SERVICIO'?'selected':''}>FUERA DE SERVICIO</option>
-            <option value="DAR DE BAJA" ${s.estadoReparacion==='DAR DE BAJA'?'selected':''}>DAR DE BAJA</option>
-        </select></div>
-        <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarServicio('${sid}')">Guardar</button></div>
-    </div></div>`);
+    const s = servicios.find(x => x.id === sid); if (!s) return;
+    const esD1 = !!s.consecutivoD1;
+    if (esD1) {
+        const TIPOS_D1 = ['Preventivo','Correctivo','Emergencia'];
+        const ESTADOS = ['Operativo','Fuera de servicio','Dar de baja'];
+        showModal(`<div class="modal"><div class="modal-h"><h3>Editar servicio D1</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b">
+            <div class="fr">
+                <div><label class="fl">Tipo</label><select class="fi" id="esTipo">${TIPOS_D1.map(t=>`<option ${s.tipo===t?'selected':''}>${t}</option>`).join('')}</select></div>
+                <div><label class="fl">Fecha</label><input class="fi" type="date" id="esFecha" value="${s.fecha}"></div>
+            </div>
+            <label class="fl">Falla encontrada</label><textarea class="fi" id="esFalla" rows="2">${s.falla||''}</textarea>
+            <label class="fl">Trabajo realizado</label><textarea class="fi" id="esTrabajo" rows="2">${s.trabajoRealizado||''}</textarea>
+            <label class="fl">Condición de entrega</label><textarea class="fi" id="esEntrega" rows="2">${s.condicionEntrega||''}</textarea>
+            <label class="fl">Estado final</label><select class="fi" id="esEstado">${ESTADOS.map(t=>`<option ${s.estadoEntrega===t?'selected':''}>${t}</option>`).join('')}</select>
+            <label class="fl">Observaciones</label><textarea class="fi" id="esObs" rows="2">${s.observaciones||''}</textarea>
+            <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarServicioD1('${sid}')">Guardar</button></div>
+        </div></div>`);
+    } else {
+        showModal(`<div class="modal"><div class="modal-h"><h3>Editar servicio</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div class="fr"><div><label class="fl">Tipo</label><select class="fi" id="esTipo"><option ${s.tipo==='Mantenimiento'?'selected':''}>Mantenimiento</option><option ${s.tipo==='Reparacion'?'selected':''}>Reparacion</option><option ${s.tipo==='Instalacion'?'selected':''}>Instalacion</option></select></div><div><label class="fl">Fecha</label><input class="fi" type="date" id="esFecha" value="${s.fecha}"></div></div><label class="fl">Diagnostico</label><textarea class="fi" id="esDesc" rows="3">${s.descripcion}</textarea><label class="fl">Proximo mantenimiento</label><input class="fi" type="date" id="esProx" value="${s.proximoMantenimiento||''}"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarServicio('${sid}')">Guardar</button></div></div></div>`);
+    }
+}
+async function actualizarServicio(sid) { const tipo = document.getElementById('esTipo')?.value; const fecha = document.getElementById('esFecha')?.value; const desc = document.getElementById('esDesc')?.value?.trim(); const prox = document.getElementById('esProx')?.value || null; try { await updateDoc(doc(db, 'servicios', sid), { tipo, fecha, descripcion: desc, proximoMantenimiento: prox }); closeModal(); await cargarDatos(); toast('✅ Servicio actualizado'); } catch(err) { toast('❌ Error: ' + err.message); } }
+async function eliminarServicio(sid) { if (!confirm('¿Eliminar este servicio?')) return; try { await deleteDoc(doc(db, 'servicios', sid)); await cargarDatos(); toast('🗑️ Eliminado'); } catch(err) { toast('❌ Error: ' + err.message); } }
+
+// ============================================
+// FUNCIONES D1 - SELLO Y FIRMA
+// ============================================
+async function generarSelloD1(nombreTienda) {
+    const SELLO_URL = 'https://raw.githubusercontent.com/capacitADA/JDARQ/main/SELLO_d1.png';
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const fontSize = Math.round(canvas.height * 0.13);
+            ctx.font = `bold ${fontSize}px Arial`;
+            ctx.fillStyle = '#1a1a1a';
+            ctx.textAlign = 'center';
+            ctx.fillText((nombreTienda || 'D1').toUpperCase(), canvas.width / 2, canvas.height * 0.30);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => reject(new Error('No se pudo cargar el sello D1'));
+        img.src = SELLO_URL;
+    });
 }
 
-function onEditTipoChange() {
-    const tipo = document.getElementById('esTipo')?.value;
-    const mb = document.getElementById('esMantBox');
-    const rb = document.getElementById('esRepBox');
-    if(mb) mb.style.display = tipo === 'Mantenimiento' ? '' : 'none';
-    if(rb) rb.style.display = tipo === 'Reparacion' ? '' : 'none';
+function iniciarFirmaCanvasD1(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth;
+    let drawing = false, lastX = 0, lastY = 0;
+    const getPos = ev => { const r = canvas.getBoundingClientRect(); const s = ev.touches ? ev.touches[0] : ev; return [s.clientX - r.left, s.clientY - r.top]; };
+    canvas.addEventListener('mousedown', e => { drawing=true; [lastX,lastY]=getPos(e); });
+    canvas.addEventListener('mousemove', e => { if(!drawing) return; const [x,y]=getPos(e); ctx.beginPath(); ctx.moveTo(lastX,lastY); ctx.lineTo(x,y); ctx.strokeStyle='#1a1a6e'; ctx.lineWidth=2; ctx.lineCap='round'; ctx.stroke(); [lastX,lastY]=[x,y]; });
+    canvas.addEventListener('mouseup', () => drawing=false);
+    canvas.addEventListener('mouseleave', () => drawing=false);
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing=true; [lastX,lastY]=getPos(e); }, {passive:false});
+    canvas.addEventListener('touchmove', e => { e.preventDefault(); if(!drawing) return; const [x,y]=getPos(e); ctx.beginPath(); ctx.moveTo(lastX,lastY); ctx.lineTo(x,y); ctx.stroke(); [lastX,lastY]=[x,y]; }, {passive:false});
+    canvas.addEventListener('touchend', () => drawing=false);
+}
+function limpiarFirmaD1() { const canvas = document.getElementById('d1FirmaCanvas'); if (canvas) { const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height); d1FirmaDataUrl = ''; } }
+
+// ============================================
+// MODAL ACTA D1 - FORMULARIO DE INGRESO DE DATOS
+// ============================================
+async function modalNuevaIncidencia(eid) {
+    if (!sesionActual) { toast('🔑 Debes iniciar sesión primero'); return; }
+    const e = getEq(eid);
+    if (!e) { toast('❌ Activo no encontrado'); return; }
+    const t = getTienda(e.tiendaId);
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const tiposAsist = ['Reparación','Garantía','Ajuste','Modificación','Servicio','Mejora','Combinación'];
+    const tiposFalla = ['BPM','Daños Logísticos','Locativo','Eléctricas','Refrigeración','Seguridad','SST','Tanqueo Planta','Puertas','Influencia Externa'];
+    const paramsEval = [
+        {cat:'FUNCIONAMIENTO', desc:'La falla reportada fue solucionada con el trabajo realizado.'},
+        {cat:'CALIDAD', desc:'La calidad del trabajo está de acuerdo a la requerida por el personal o el equipo.'},
+        {cat:'LIMPIEZA', desc:'El equipo o área intervenida se dejó armado y/o organizado como se encontraba en un inicio.'},
+        {cat:'LIMPIEZA', desc:'Los escombros y suciedad generada por el técnico fueron retirados del lugar.'},
+        {cat:'LIMPIEZA', desc:'Se indicó la causa de la novedad al personal que recibió el trabajo.'},
+        {cat:'CAPACITACIÓN', desc:'Se indicó cómo prevenir que el problema se vuelva a presentar.'},
+        {cat:'CAPACITACIÓN', desc:'Se indicó cómo actuar en caso de que el problema se vuelva a presentar.'},
+        {cat:'SERVICIO', desc:'Se encuentra satisfecho con el servicio ejecutado.'},
+    ];
+
+    showModal(`<div class="modal modal-wide" onclick="event.stopPropagation()">
+      <div class="modal-h" style="background:#1a1a1a;border-bottom:2px solid #C9A84C;">
+        <h3 style="color:#C9A84C;">📋 ORDEN DE TRABAJO</h3>
+        <button class="xbtn" style="color:white;" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-b">
+
+        <!-- DATOS FIJOS CONTRATISTA -->
+        <div style="background:#f5f5f5;border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:.78rem;">
+          <strong>JD Arquisoluciones S.A.S</strong> · NIT 901.223.583-8 · 310 553 3937<br>
+          Técnico: <strong>${sesionActual.nombre}</strong> · CC ${sesionActual.cedula||''}
+        </div>
+
+        <!-- ID MTTO Y CÓDIGO TIENDA -->
+        <div class="fr">
+          <div>
+            <label class="fl">ID MTTO / N° Incidencia D1 ★</label>
+            <input class="fi" id="otIdMtto" placeholder="246723" style="font-weight:700;font-size:1rem;">
+          </div>
+          <div>
+            <label class="fl">Código de tienda ★</label>
+            <input class="fi" id="otCodTienda" value="${t?.codigo||''}" placeholder="13116" oninput="autocompletarTienda(this.value)" ${t?'readonly':''}>
+          </div>
+        </div>
+        <div id="otTiendaInfo" style="font-size:.76rem;color:#16a34a;margin-bottom:8px;font-weight:600;">
+          ${t ? `✅ ${t.nombre} · ${t.municipio}, ${t.departamento}` : ''}
+        </div>
+        <div class="fr">
+          <div>
+            <label class="fl">Fecha</label>
+            <input class="fi" type="date" id="otFecha" value="${hoy}">
+          </div>
+          <div>
+            <label class="fl">Activo</label>
+            <input class="fi" readonly value="${e.nombre||e.tipo||'Activo'}" style="background:#f5f5f5;font-weight:700;">
+          </div>
+        </div>
+
+        <!-- TIPO DE ASISTENCIA -->
+        <label class="fl">Tipo de asistencia</label>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-bottom:10px;">
+          ${tiposAsist.map(t => `<label style="display:flex;align-items:center;gap:5px;font-size:.78rem;padding:4px 6px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;background:white;">
+            <input type="radio" name="otTipoAsist" value="${t}" ${t==='Servicio'?'checked':''}> ${t}
+          </label>`).join('')}
+        </div>
+
+        <!-- TIPO DE FALLA -->
+        <label class="fl">Tipo de falla</label>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-bottom:10px;">
+          ${tiposFalla.map(f => `<label style="display:flex;align-items:center;gap:5px;font-size:.76rem;padding:4px 6px;border:1px solid #e0e0e0;border-radius:6px;cursor:pointer;background:white;">
+            <input type="checkbox" class="otFalla" value="${f}"> ${f}
+          </label>`).join('')}
+        </div>
+
+        <!-- DESCRIPCIÓN -->
+        <label class="fl">Descripción detallada de la solicitud ★</label>
+        <textarea class="fi" id="otDescSolicitud" rows="3" placeholder="Describe la solicitud..."></textarea>
+
+        <label class="fl">Actividades ejecutadas ★</label>
+        <textarea class="fi" id="otActividades" rows="3" placeholder="Describe las actividades realizadas..."></textarea>
+
+        <label class="fl">Repuestos cambiados</label>
+        <textarea class="fi" id="otRepuestos" rows="2" placeholder="Repuestos utilizados..."></textarea>
+
+        <label class="fl">Recomendaciones</label>
+        <textarea class="fi" id="otRecomend" rows="2" placeholder="Recomendaciones..."></textarea>
+
+        <!-- EVALUACIÓN DEL SERVICIO -->
+        <div style="background:#1a1a1a;color:#C9A84C;padding:6px 8px;border-radius:6px;font-weight:700;font-size:.78rem;text-align:center;margin:10px 0 6px;">EVALUACIÓN DEL SERVICIO</div>
+        <div style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-bottom:10px;">
+          <div style="display:grid;grid-template-columns:80px 1fr 40px 40px;background:#1a1a1a;color:#C9A84C;font-size:.65rem;font-weight:700;padding:4px 6px;">
+            <div>Parámetro</div><div>Descripción</div><div style="text-align:center;">SI</div><div style="text-align:center;">NO</div>
+          </div>
+          ${paramsEval.map((p,i) => `
+          <div style="display:grid;grid-template-columns:80px 1fr 40px 40px;border-top:1px solid #f0f0f0;padding:4px 6px;background:white;align-items:center;">
+            <div style="font-size:.62rem;font-weight:700;color:#C9A84C;">${p.cat}</div>
+            <div style="font-size:.68rem;">${p.desc}</div>
+            <div style="text-align:center;"><input type="radio" name="eval_${i}" value="SI" checked></div>
+            <div style="text-align:center;"><input type="radio" name="eval_${i}" value="NO"></div>
+          </div>`).join('')}
+        </div>
+
+        <!-- CALIFICACIÓN -->
+        <div style="background:#1a1a1a;color:#C9A84C;padding:6px 8px;border-radius:6px;font-weight:700;font-size:.78rem;text-align:center;margin-bottom:8px;">CALIFICA MI SERVICIO</div>
+        <div style="display:flex;justify-content:center;gap:24px;margin-bottom:12px;">
+          ${[['Excelente','😊'],['Bueno','😐'],['Malo','😞']].map(([v,em]) => `
+          <label style="text-align:center;cursor:pointer;">
+            <div style="font-size:1.6rem;">${em}</div>
+            <div style="font-size:.72rem;font-weight:700;">${v}</div>
+            <input type="radio" name="otCalif" value="${v}" ${v==='Excelente'?'checked':''}>
+          </label>`).join('')}
+        </div>
+
+        <!-- HORAS -->
+        <div class="fr">
+          <div><label class="fl">Hora de entrada</label><input class="fi" type="time" id="otHoraEnt"></div>
+          <div><label class="fl">Hora de salida</label><input class="fi" type="time" id="otHoraSal"></div>
+        </div>
+
+        <!-- FUNCIONARIO TIENDA -->
+        <div style="background:#1a1a1a;color:#C9A84C;padding:6px 8px;border-radius:6px;font-weight:700;font-size:.78rem;text-align:center;margin:10px 0 6px;">FUNCIONARIO DE LA TIENDA</div>
+        <div class="fr">
+          <div><label class="fl">Nombre</label><input class="fi" id="otFuncNombre" placeholder="Nombre completo"></div>
+          <div><label class="fl">Cargo</label><input class="fi" id="otFuncCargo" placeholder="Cargo"></div>
+        </div>
+        <label class="fl">Teléfono</label>
+        <input class="fi" id="otFuncTel" type="tel" placeholder="Teléfono de contacto" style="margin-bottom:12px;">
+
+        <!-- FOTOS -->
+        <div style="background:#1a1a1a;color:#C9A84C;padding:6px 8px;border-radius:6px;font-weight:700;font-size:.78rem;text-align:center;margin-bottom:8px;">EVIDENCIAS FOTOGRÁFICAS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+          ${[['ANTES',0],['DESPUÉS',1]].map(([lbl,i]) => `
+          <div>
+            <div style="font-size:.72rem;font-weight:700;text-align:center;margin-bottom:4px;">${lbl}</div>
+            <div class="fslot" id="fslotOT${i}" onclick="document.getElementById('finputOT${i}').click()">
+              <div class="fslot-plus">+</div>
+              <input type="file" id="finputOT${i}" accept="image/*" style="display:none" onchange="previewFotoOT(this,${i})">
+            </div>
+          </div>`).join('')}
+        </div>
+
+        <!-- FIRMA JEFE -->
+        <div style="background:#1a1a1a;color:#C9A84C;padding:6px 8px;border-radius:6px;font-weight:700;font-size:.78rem;text-align:center;margin-bottom:8px;">FIRMA FUNCIONARIO DE LA TIENDA</div>
+        <canvas id="firmaOTCanvas" style="width:100%;height:110px;border:2px dashed #e0e0e0;border-radius:8px;background:white;touch-action:none;display:block;"></canvas>
+        <button class="btn btn-gray btn-sm" onclick="limpiarFirmaOT()" style="margin-top:4px;margin-bottom:12px;">Limpiar firma</button>
+
+        <div class="modal-foot">
+          <button class="btn btn-gray" onclick="closeModal()">Cancelar</button>
+          <button class="btn" style="background:#555;color:white;" onclick="guardarIncidencia('${eid}',false)">💾 Guardar</button>
+          <button class="btn" style="background:#C9A84C;color:#1a1a1a;font-weight:700;" onclick="guardarIncidencia('${eid}',true)">📄 Guardar y PDF</button>
+        </div>
+      </div>
+    </div>`);
+
+    setTimeout(() => iniciarFirmaCanvasOT('firmaOTCanvas'), 100);
 }
 
-// FIX: actualizarServicio ahora guarda estadoReparacion y proximoMantenimiento condicional
-async function actualizarServicio(sid) {
-    const tipo = document.getElementById('esTipo')?.value;
-    const fecha = document.getElementById('esFecha')?.value;
-    const desc = document.getElementById('esDesc')?.value?.trim();
-    const prox = tipo === 'Mantenimiento' ? (document.getElementById('esProx')?.value || null) : null;
-    const estadoRep = tipo === 'Reparacion' ? (document.getElementById('esEstado')?.value || null) : null;
+function iniciarFirmaCanvasOT(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    canvas.width  = canvas.offsetWidth || 340;
+    canvas.height = 110;
+    const ctx = canvas.getContext('2d');
+    let drawing = false, lx = 0, ly = 0;
+    const pos = ev => { const r=canvas.getBoundingClientRect(); const s=ev.touches?ev.touches[0]:ev; return [s.clientX-r.left, s.clientY-r.top]; };
+    canvas.addEventListener('mousedown',  e => { drawing=true; [lx,ly]=pos(e); });
+    canvas.addEventListener('mousemove',  e => { if(!drawing) return; const [x,y]=pos(e); ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(x,y); ctx.strokeStyle='#1a1a6e'; ctx.lineWidth=2; ctx.lineCap='round'; ctx.stroke(); [lx,ly]=[x,y]; });
+    canvas.addEventListener('mouseup',    () => drawing=false);
+    canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing=true; [lx,ly]=pos(e); }, {passive:false});
+    canvas.addEventListener('touchmove',  e => { e.preventDefault(); if(!drawing) return; const [x,y]=pos(e); ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(x,y); ctx.strokeStyle='#1a1a6e'; ctx.lineWidth=2; ctx.lineCap='round'; ctx.stroke(); [lx,ly]=[x,y]; }, {passive:false});
+    canvas.addEventListener('touchend',   () => drawing=false);
+}
+
+window.limpiarFirmaOT = () => { const c=document.getElementById('firmaOTCanvas'); if(c) c.getContext('2d').clearRect(0,0,c.width,c.height); };
+
+window.previewFotoOT = (input, idx) => {
+    const file = input.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+        if (!window._fotosOT) window._fotosOT = [null,null];
+        window._fotosOT[idx] = ev.target.result;
+        const slot = document.getElementById(`fslotOT${idx}`);
+        if (slot) slot.innerHTML = `<img src="${ev.target.result}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;">`;
+    };
+    reader.readAsDataURL(file);
+};
+
+window.autocompletarTienda = (codigo) => {
+    const t = tiendas.find(x => x.codigo === codigo.trim().toUpperCase());
+    const info = document.getElementById('otTiendaInfo');
+    if (info) info.textContent = t ? `✅ ${t.nombre} · ${t.municipio}, ${t.departamento}` : '';
+};
+
+async function guardarIncidencia(eid, generarPDF) {
+    const idMtto     = document.getElementById('otIdMtto')?.value?.trim();
+    const codTienda  = document.getElementById('otCodTienda')?.value?.trim().toUpperCase();
+    const fecha      = document.getElementById('otFecha')?.value;
+    const tipoAsist  = document.querySelector('input[name="otTipoAsist"]:checked')?.value||'';
+    const fallas     = Array.from(document.querySelectorAll('.otFalla:checked')).map(cb=>cb.value);
+    const descSolic  = document.getElementById('otDescSolicitud')?.value?.trim();
+    const actividades= document.getElementById('otActividades')?.value?.trim();
+    const repuestos  = document.getElementById('otRepuestos')?.value?.trim()||'';
+    const recomend   = document.getElementById('otRecomend')?.value?.trim()||'';
+    const calif      = document.querySelector('input[name="otCalif"]:checked')?.value||'Excelente';
+    const horaEnt    = document.getElementById('otHoraEnt')?.value||'';
+    const horaSal    = document.getElementById('otHoraSal')?.value||'';
+    const funcNombre = document.getElementById('otFuncNombre')?.value?.trim()||'';
+    const funcCargo  = document.getElementById('otFuncCargo')?.value?.trim()||'';
+    const funcTel    = document.getElementById('otFuncTel')?.value?.trim()||'';
+
+    if (!idMtto)     { toast('⚠️ Ingresa el ID MTTO / N° Incidencia'); return; }
+    if (!codTienda)  { toast('⚠️ Ingresa el código de tienda'); return; }
+    if (!descSolic)  { toast('⚠️ Completa la descripción'); return; }
+    if (!actividades){ toast('⚠️ Completa las actividades ejecutadas'); return; }
+
+    const tienda = tiendas.find(x => x.codigo === codTienda);
+    const e      = getEq(eid);
+    const firmaCanvas = document.getElementById('firmaOTCanvas');
+    const firmaJefe   = firmaCanvas ? firmaCanvas.toDataURL('image/png') : '';
+    const fotos = (window._fotosOT||[]).filter(Boolean);
+
+    const payload = {
+        equipoId:   eid,
+        tiendaId:   tienda?.id || e?.tiendaId || '',
+        clienteId:  e?.clienteId || '',
+        idMtto, fecha, tipoAsistencia: tipoAsist,
+        tiposFalla: fallas,
+        descripcion: descSolic, actividades, repuestos, recomendaciones: recomend,
+        calificacion: calif, horaEntrada: horaEnt, horaSalida: horaSal,
+        funcNombre, funcCargo, funcTel,
+        tiendaCodigo: codTienda,
+        tiendaNombre: tienda?.nombre||'',
+        tiendaMunicipio: tienda?.municipio||'',
+        tiendaDepartamento: tienda?.departamento||'',
+        tecnico: sesionActual?.nombre||'',
+        tecnicoCedula: sesionActual?.cedula||'',
+        tecnicoCargo: sesionActual?.cargo||'Técnico',
+        firmaJefe, fotos,
+        aprobado: false,
+        pendienteAprobacion: true,
+        creadoEn: new Date().toISOString(),
+        tipo: tipoAsist
+    };
+
     try {
-        await updateDoc(doc(db,'servicios',sid), { tipo, fecha, descripcion: desc, proximoMantenimiento: prox, estadoReparacion: estadoRep });
-        closeModal(); await cargarDatos(); toast('✅ Servicio actualizado');
-    } catch(err) { toast('❌ Error: '+err.message); }
+        window._fotosOT = [null,null];
+        await cargarDatos();
+        if (generarPDF) { closeModal(); await generarPDFOrden({...payload}); }
+        else closeModal();
+    } catch(err) { toast('⚠️ Error: ' + err.message); }
 }
 
-async function eliminarServicio(sid) {
-    if(!confirm('¿Eliminar este servicio?')) return;
-    try { await deleteDoc(doc(db,'servicios',sid)); await cargarDatos(); toast('🗑️ Eliminado'); } catch(err) { toast('❌ Error: '+err.message); }
+
+async function generarPDFOrden(s) {
+    const e = getEq(s.equipoId);
+    const hoy = new Date(s.creadoEn||Date.now());
+    const dd  = String(hoy.getDate()).padStart(2,'0');
+    const MESES = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+    const mes = MESES[hoy.getMonth()];
+    const aa  = String(hoy.getFullYear()).slice(-2);
+
+    const TIPOS_ASIST = ['Reparación','Garantía','Ajuste','Modificación','Servicio','Mejora','Combinación'];
+    const TIPOS_FALLA = ['BPM','Daños Logísticos','Locativo','Eléctricas','Refrigeración','Seguridad','SST','Tanqueo Planta','Puertas','Influencia Externa'];
+    const PARAMS_EVAL = [
+        {cat:'FUNCIONAMIENTO', desc:'La falla reportada fue solucionada con el trabajo realizado.'},
+        {cat:'CALIDAD', desc:'La calidad del trabajo está de acuerdo a la requerida por el personal o el equipo.'},
+        {cat:'LIMPIEZA', desc:'El equipo o área intervenida se dejó armado y/o organizado como se encontraba en un inicio.'},
+        {cat:'LIMPIEZA', desc:'Los escombros y suciedad generada por el técnico fueron retirados del lugar.'},
+        {cat:'LIMPIEZA', desc:'Se indicó la causa de la novedad al personal que recibió el trabajo.'},
+        {cat:'CAPACITACIÓN', desc:'Se indicó cómo prevenir que el problema se vuelva a presentar.'},
+        {cat:'CAPACITACIÓN', desc:'Se indicó cómo actuar en caso de que el problema se vuelva a presentar.'},
+        {cat:'SERVICIO', desc:'Se encuentra satisfecho con el servicio ejecutado.'},
+    ];
+
+    function chk(val, lista) {
+        return (lista||[]).includes(val)
+            ? '<span style="font-size:11pt;font-weight:900;">&#9632;</span>'
+            : '<span style="font-size:9pt;color:#ccc;">&#9744;</span>';
+    }
+    function lineas(txt, n) {
+        const arr = (txt||'').split('\n').concat(Array(n).fill('')).slice(0,n);
+        return arr.map((t,i) => `<tr style="height:16px;border-bottom:${i===n-1?'2px':'1px'} solid ${i===n-1?'#000':'#bbb'};"><td style="padding:1px 4px;font-size:8pt;">${t}&nbsp;</td></tr>`).join('');
+    }
+
+    let selloHtml = '<div style="color:#aaa;font-size:7pt;text-align:center;">Pendiente aprobación</div>';
+    if (s.aprobado) {
+        try {
+            const selloB64 = await new Promise((res,rej) => {
+                const img = new Image(); img.crossOrigin='Anonymous';
+                img.onload = () => { const c=document.createElement('canvas'); c.width=img.width; c.height=img.height; c.getContext('2d').drawImage(img,0,0); res(c.toDataURL()); };
+                img.onerror = rej;
+                img.src = 'https://raw.githubusercontent.com/capacitADA/JDARQ/main/SELLO_jdarq.png';
+            });
+            selloHtml = `<img src="${selloB64}" style="max-height:70px;">`;
+        } catch(e) {}
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<title>OT_${s.idMtto||''}</title>
+<style>
+@font-face { font-family:'Meddon'; src:url('https://raw.githubusercontent.com/capacitADA/JDARQ/main/Meddon-Regular.ttf') format('truetype'); }
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Arial,sans-serif;background:#fff;padding:14px;font-size:7.5pt;width:794px;}
+.blk{border:2px solid #000;border-collapse:collapse;width:100%;margin-top:-2px;}
+.blk td,.blk th{border:1px solid #000;padding:2px 5px;vertical-align:middle;font-size:7.5pt;}
+.hd{font-weight:700;text-align:center;font-size:9pt;padding:4px;background:#f5f5f5;}
+.lbl{font-weight:700;white-space:nowrap;width:1%;}
+</style></head><body>
+
+<!-- CABECERA -->
+<table style="width:100%;border-collapse:collapse;border:2px solid #000;margin-bottom:-2px;">
+  <tr>
+    <td style="width:70px;text-align:center;padding:4px;border-right:1px solid #000;">
+      <img src="https://raw.githubusercontent.com/capacitADA/JDARQ/main/JDARQ-logo.png" style="height:44px;" crossorigin="anonymous">
+    </td>
+    <td style="text-align:center;font-weight:700;font-size:10pt;">ORDEN DE TRABAJO MANTENIMIENTO</td>
+    <td style="width:160px;text-align:right;padding:4px;border-left:1px solid #000;font-size:8pt;">
+      <strong>ID MTTO: ${s.idMtto||''}</strong><br>FECHA: <strong>${dd} ${mes} ${aa}</strong>
+    </td>
+  </tr>
+</table>
+
+<!-- INFORMACIÓN CONTRATISTA -->
+<table class="blk">
+  <tr><td colspan="4" class="hd">INFORMACIÓN CONTRATISTA</td></tr>
+  <tr><td class="lbl">Razón Social:</td><td colspan="3">JD Arquisoluciones S.A.S</td></tr>
+  <tr><td class="lbl">N° NIT:</td><td>901.223.583-8</td><td class="lbl">Teléfono:</td><td>310 553 3937</td></tr>
+  <tr><td class="lbl">Contacto:</td><td colspan="3">Cristian David Londoño Romero</td></tr>
+</table>
+
+<!-- INFORMACIÓN SOLICITANTE Y TIENDA -->
+<table class="blk">
+  <tr><td colspan="6" class="hd">INFORMACIÓN SOLICITANTE Y TIENDA D1</td></tr>
+  <tr>
+    <td class="lbl">Nombre de la tienda:</td><td colspan="2">${s.tiendaNombre||s.tiendaCodigo||''}</td>
+    <td class="lbl">COD. TIENDA:</td><td colspan="2">${s.tiendaCodigo||''}</td>
+  </tr>
+  <tr>
+    <td class="lbl">Nombre del solicitante:</td><td colspan="2">${s.funcNombre||''}</td>
+    <td class="lbl">Departamento:</td><td colspan="2">${s.tiendaDepartamento||''}</td>
+  </tr>
+  <tr><td class="lbl">Municipio:</td><td colspan="5">${s.tiendaMunicipio||''}</td></tr>
+  <tr>
+    <td class="lbl">Activo:</td><td colspan="2">${e?.nombre||e?.tipo||''}</td>
+    <td class="lbl">Descripción:</td><td colspan="2">${e?.descripcion||''}</td>
+  </tr>
+</table>
+
+<!-- TIPO DE ASISTENCIA -->
+<table class="blk">
+  <tr><td colspan="8" class="hd">TIPO DE ASISTENCIA (Marque con una X)</td></tr>
+  <tr>${TIPOS_ASIST.map(t => `<td style="text-align:center;font-size:7pt;">${t} ${chk(t,[s.tipoAsistencia])}</td>`).join('')}</tr>
+</table>
+
+<!-- TIPO DE FALLA -->
+<table class="blk">
+  <tr><td colspan="5" class="hd">TIPO DE FALLA (Marque con una X)</td></tr>
+  <tr>${TIPOS_FALLA.slice(0,5).map(f => `<td style="text-align:center;font-size:7pt;">${f} ${chk(f,s.tiposFalla)}</td>`).join('')}</tr>
+  <tr>${TIPOS_FALLA.slice(5).map(f => `<td style="text-align:center;font-size:7pt;">${f} ${chk(f,s.tiposFalla)}</td>`).join('')}</tr>
+</table>
+
+<!-- DESCRIPCIÓN -->
+<table class="blk"><tr><td class="hd">Descripción detallada de la solicitud:</td></tr></table>
+<table style="width:100%;border-collapse:collapse;border-left:2px solid #000;border-right:2px solid #000;">${lineas(s.descripcion,4)}</table>
+
+<!-- ACTIVIDADES -->
+<table class="blk"><tr><td class="hd">Actividades ejecutadas:</td></tr></table>
+<table style="width:100%;border-collapse:collapse;border-left:2px solid #000;border-right:2px solid #000;">${lineas(s.actividades,5)}</table>
+
+<!-- REPUESTOS -->
+<table class="blk"><tr><td class="hd">Repuestos cambiados:</td></tr></table>
+<table style="width:100%;border-collapse:collapse;border-left:2px solid #000;border-right:2px solid #000;">${lineas(s.repuestos,3)}</table>
+
+<!-- RECOMENDACIONES -->
+<table class="blk"><tr><td class="hd">Recomendaciones:</td></tr></table>
+<table style="width:100%;border-collapse:collapse;border-left:2px solid #000;border-right:2px solid #000;">${lineas(s.recomendaciones,3)}</table>
+
+<!-- EVALUACIÓN -->
+<table class="blk">
+  <tr><td colspan="4" class="hd">EVALUACIÓN DEL SERVICIO</td></tr>
+  <tr><th style="font-size:7pt;width:80px;">PARÁMETROS</th><th style="font-size:7pt;">Descripción</th><th style="width:35px;text-align:center;font-size:7pt;">SI</th><th style="width:35px;text-align:center;font-size:7pt;">NO</th></tr>
+  ${PARAMS_EVAL.map(p => `<tr>
+    <td style="font-size:7pt;font-weight:700;">${p.cat}</td>
+    <td style="font-size:7pt;">${p.desc}</td>
+    <td style="text-align:center;">&#9632;</td>
+    <td style="text-align:center;"></td>
+  </tr>`).join('')}
+</table>
+
+<!-- CALIFICACIÓN -->
+<table class="blk">
+  <tr><td colspan="3" class="hd">CALIFICA MI SERVICIO (Marque con una X)</td></tr>
+  <tr>
+    <td style="text-align:center;width:33%;font-size:9pt;">Excelente ${chk('Excelente',[s.calificacion])}</td>
+    <td style="text-align:center;width:33%;font-size:9pt;">Bueno ${chk('Bueno',[s.calificacion])}</td>
+    <td style="text-align:center;width:34%;font-size:9pt;">Malo ${chk('Malo',[s.calificacion])}</td>
+  </tr>
+</table>
+
+<!-- CONSTANCIA -->
+<table class="blk">
+  <tr><td colspan="6" class="hd">CONSTANCIA DE ASISTENCIA REALIZADA</td></tr>
+  <tr>
+    <th style="font-size:7pt;">Datos</th>
+    <th style="font-size:7pt;">Contratistas</th>
+    <th style="font-size:7pt;">Cédula</th>
+    <th style="font-size:7pt;">Hora de entrada</th>
+    <th style="font-size:7pt;">Hora de salida</th>
+    <th style="font-size:7pt;">Funcionario de la tienda</th>
+  </tr>
+  <tr>
+    <td style="font-size:7pt;">${s.tecnico||''}</td>
+    <td style="font-family:'Meddon',cursive;font-size:12pt;">&nbsp;</td>
+    <td style="font-size:7pt;">${s.tecnicoCedula||''}</td>
+    <td style="font-size:7pt;">${s.horaEntrada||''}</td>
+    <td style="font-size:7pt;">${s.horaSalida||''}</td>
+    <td style="font-size:7pt;">
+      Nombre: ${s.funcNombre||''}<br>
+      Teléfono: ${s.funcTel||''}<br>
+      Cargo: ${s.funcCargo||''}
+    </td>
+  </tr>
+  <tr>
+    <td colspan="3" style="padding:4px;height:65px;vertical-align:bottom;border:1px solid #000;">
+      <div style="font-family:'Meddon',cursive;font-size:14pt;color:#1a1a6e;">${s.tecnico||''}</div>
+      <div style="border-top:1px solid #000;margin-top:2px;padding-top:2px;font-size:6.5pt;font-weight:700;">Firma Técnico Encargado / Cargo: ${s.tecnicoCargo||'Técnico'}</div>
+    </td>
+    <td colspan="3" style="padding:4px;height:65px;vertical-align:middle;text-align:center;border:1px solid #000;">
+      ${selloHtml}
+    </td>
+  </tr>
+</table>
+
+${s.fotos?.length ? `
+<div style="page-break-before:always;"></div>
+<table class="blk" style="margin-top:0;">
+  <tr><td colspan="2" class="hd">EVIDENCIAS FOTOGRÁFICAS — OT ${s.idMtto||''}</td></tr>
+  <tr>
+    <td style="width:50%;text-align:center;font-weight:700;font-size:7pt;padding:3px;">ANTES</td>
+    <td style="width:50%;text-align:center;font-weight:700;font-size:7pt;padding:3px;">DESPUÉS</td>
+  </tr>
+  <tr>
+    <td style="height:300px;text-align:center;vertical-align:middle;padding:4px;">${s.fotos[0]?`<img src="${s.fotos[0]}" style="max-width:100%;max-height:290px;">`:'&nbsp;'}</td>
+    <td style="height:300px;text-align:center;vertical-align:middle;padding:4px;">${s.fotos[1]?`<img src="${s.fotos[1]}" style="max-width:100%;max-height:290px;">`:'&nbsp;'}</td>
+  </tr>
+</table>` : ''}
+
+<div style="color:#c0392b;font-size:5.5pt;text-align:center;margin-top:6px;font-style:italic;">
+  Nota: Se debe diligenciar los campos de firma clara y legible, sin tachones y enmendados; este documento debe entregarse diligenciado en su totalidad de lo contrario no será válido.
+</div>
+</body></html>`;
+
+    toast('⏳ Generando PDF...');
+    try {
+        if (!window.html2canvas) await new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+        if (!window.jspdf)      await new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+        await new Promise(r=>setTimeout(r,300));
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText='position:fixed;left:-9999px;top:0;width:794px;height:1200px;border:none;';
+        document.body.appendChild(iframe);
+        iframe.contentDocument.open(); iframe.contentDocument.write(html); iframe.contentDocument.close();
+        await document.fonts.ready;
+        await new Promise(r=>setTimeout(r,1200));
+        const canvas = await window.html2canvas(iframe.contentDocument.body,{scale:2.5,backgroundColor:'#fff',useCORS:true,allowTaint:true,logging:false,windowWidth:794});
+        document.body.removeChild(iframe);
+        const {jsPDF} = window.jspdf;
+        const pdf = new jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
+        pdf.addImage(canvas.toDataURL('image/png'),'PNG',0,0,210,(canvas.height*210)/canvas.width);
+        pdf.save(`OT_${s.idMtto||s.equipoId}_${s.tiendaCodigo||''}.pdf`);
+        toast('✅ PDF descargado');
+    } catch(err) {
+        const blob = new Blob([html],{type:'text/html;charset=utf-8'});
+        const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
+        a.download=`OT_${s.idMtto||''}.html`; a.click();
+        toast('⚠️ PDF falló — descargado como HTML');
+    }
+}
+
+async function modalActaD1(eid) {
+    if (!sesionActual) { toast('🔑 Debes iniciar sesión primero'); return; }
+    const e = getEq(eid);
+    if (!e) { toast('❌ Equipo no encontrado'); return; }
+    if (!esClienteD1(e.clienteId)) { toast('❌ Este equipo no pertenece a D1 SAS'); return; }
+    const tienda = getTiendaD1(e.idTienda);
+    if (!tienda) toast('⚠️ No se encontró la tienda D1 para este equipo');
+    const hoy = new Date();
+    const dd = String(hoy.getDate()).padStart(2, '0');
+    const aa = String(hoy.getFullYear()).slice(-2);
+    const meses = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+    const mes = meses[hoy.getMonth()];
+    let consecutivo = '';
+    try { consecutivo = await obtenerConsecutivoD1(); } catch (err) { toast('❌ Error obteniendo consecutivo: ' + err.message); consecutivo = `K-${Math.floor(Math.random() * 10000)}`; }
+    fotosD1 = [null, null];
+    d1FirmaDataUrl = '';
+    showModal(`<div class="modal modal-wide" onclick="event.stopPropagation()"><div class="modal-h" style="background:#e4002b;"><h3 style="color:white;">📋 ACTA D1 SAS — ${consecutivo}</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div style="background:#f0f0f0;padding:8px;margin-bottom:12px;text-align:center;font-weight:700;">DATOS DEL PROVEEDOR</div><div class="fr"><div><label class="fl">NOMBRE</label><input class="fi" readonly value="JD Arquisoluciones S.A.S"></div><div><label class="fl">NIT</label><input class="fi" readonly value="901.223.583-8"></div></div><div class="fr"><div><label class="fl">CONSECUTIVO</label><input class="fi" readonly value="${consecutivo}" style="font-family:monospace;font-weight:700;"></div><div><label class="fl"># COTIZACION</label><input class="fi" readonly value=""></div></div><div class="fr"><div><label class="fl">TIENDA (CEDI)</label><input class="fi" readonly value="${tienda?.tienda || e.ubicacion || ''}"></div><div><label class="fl">ID SERVICIO *</label><input class="fi" id="d1IdServicio" placeholder="Número de ticket / ID servicio"></div></div><div style="background:#f0f0f0;padding:8px;margin:12px 0 8px;text-align:center;font-weight:700;">TIPO DE SERVICIO SOLICITADO</div><div style="margin-bottom:8px;"><div style="font-weight:700;margin-bottom:4px;">TIPO MANTENIMIENTO</div><div style="display:flex;gap:12px;">${['Preventivo','Correctivo','Emergencia'].map(t => `<label style="display:flex;align-items:center;gap:4px;"><input type="radio" name="d1TipoMant" value="${t}" ${t === 'Preventivo' ? 'checked' : ''}> ${t}</label>`).join('')}</div></div><div style="margin-bottom:8px;"><div style="font-weight:700;margin-bottom:4px;">ESPECIALIDAD</div><div style="display:flex;flex-wrap:wrap;gap:8px;">${['Civil','Eléctrico','Metalmecánico','Refrigeración','Plomería','Cerrajería','Otro'].map(esp => { const match = esp === (e.especialidad || 'Refrigeración'); return `<label style="display:flex;align-items:center;gap:4px;background:${match?'#fff3e0':'transparent'};padding:2px 6px;border-radius:4px;border:${match?'1.5px solid #f59e0b':'1px solid #ddd'};"><input type="checkbox" class="d1Especialidad" value="${esp}" ${match ? 'checked' : ''} disabled> ${esp}</label>`; }).join('')}</div></div><div style="margin-bottom:12px;"><div style="font-weight:700;margin-bottom:4px;">INFORMACION DEL EQUIPO</div><div style="display:flex;flex-wrap:wrap;gap:8px;">${['Nevera','Aire acondicionado','Congelador','Cortina de aire','Otro'].map(tipoEq => { const match = tipoEq === (e.tipo || ''); const otroMatch = tipoEq === 'Otro' && !['Nevera','Aire acondicionado','Congelador','Cortina de aire'].includes(e.tipo || ''); return `<label style="display:flex;align-items:center;gap:4px;background:${match||otroMatch?'#fff3e0':'transparent'};padding:2px 6px;border-radius:4px;border:${match||otroMatch?'1.5px solid #f59e0b':'1px solid #ddd'};"><input type="checkbox" class="d1TipoEquipo" value="${tipoEq}" ${match||otroMatch ? 'checked' : ''} disabled> ${tipoEq}</label>`; }).join('')}</div></div><div style="background:#f0f0f0;padding:8px;margin:12px 0 8px;text-align:center;font-weight:700;">DESCRIPCIÓN DEL SERVICIO EJECUTADO</div><textarea class="fi" id="d1Falla" rows="3" placeholder="① ¿Cuál era la falla y cómo la halló?"></textarea><textarea class="fi" id="d1Trabajo" rows="3" placeholder="② ¿Qué hizo para repararla?"></textarea><textarea class="fi" id="d1Entrega" rows="2" placeholder="③ ¿Cómo lo entrega?"></textarea><div style="margin:10px 0;"><div style="font-weight:700;margin-bottom:6px;">④ ESTADO:</div><div style="display:flex;flex-wrap:wrap;gap:12px;">${['Operativo','Fuera de servicio','Dar de baja'].map(est => `<label style="display:flex;align-items:center;gap:4px;"><input type="radio" name="d1Estado" value="${est}" ${est === 'Operativo' ? 'checked' : ''}> ${est}</label>`).join('')}</div></div><div style="background:#f0f0f0;padding:8px;margin:12px 0 8px;text-align:center;font-weight:700;">EVIDENCIAS FOTOGRÁFICAS</div><div class="foto-row"><div style="flex:1;"><div class="fslot" id="fslot0_d1" onclick="document.getElementById('finput0_d1').click()"><div class="fslot-plus">+</div><div class="fslot-lbl">ANTES</div><input type="file" id="finput0_d1" accept="image/*" style="display:none" onchange="previewFoto(this, 0, true)"></div></div><div style="flex:1;"><div class="fslot" id="fslot1_d1" onclick="document.getElementById('finput1_d1').click()"><div class="fslot-plus">+</div><div class="fslot-lbl">DESPUÉS</div><input type="file" id="finput1_d1" accept="image/*" style="display:none" onchange="previewFoto(this, 1, true)"></div></div></div><div style="background:#f0f0f0;padding:8px;margin:12px 0 8px;text-align:center;font-weight:700;">OBSERVACIONES O RECOMENDACIONES</div><textarea class="fi" id="d1Observaciones" rows="2" placeholder="Observaciones..."></textarea><div style="background:#f0f0f0;padding:8px;margin:12px 0 8px;text-align:center;font-weight:700;">ENTREGA A SATISFACCIÓN D1 SAS</div><div class="fr"><div><label class="fl">FIRMA TÉCNICO (PROVEEDOR)</label><div style="border:1px solid #ccc;border-radius:8px;padding:8px;text-align:center;"><div style="font-family:'Meddon', cursive; font-size:16px;">${sesionActual?.nombre || ''}</div><div>C.C. ${sesionActual?.cedula || ''}</div><div style="font-size:0.7rem;color:#666;">${sesionActual?.cargo || ''}</div></div></div><div><label class="fl">SELLO Y FIRMA D1 SAS</label><div style="border:1px solid #ccc;border-radius:8px;padding:8px;"><canvas id="d1FirmaCanvas" width="300" height="80" style="width:100%;height:80px;border:1px dashed #aaa;border-radius:8px;background:#fafafa;"></canvas><button class="btn btn-gray btn-sm" style="margin-top:4px;" onclick="limpiarFirmaD1()">🗑️ Limpiar firma</button></div></div></div><div class="fr" style="margin-top:8px;"><div><label class="fl">Nombre funcionario D1</label><input class="fi" id="d1FuncNombre" placeholder="Nombre completo"></div><div><label class="fl">Identificación funcionario</label><input class="fi" id="d1FuncId" placeholder="Número de cédula"></div></div><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn" style="background:#e4002b;color:white;" onclick="exportarActaD1('${eid}', '${consecutivo}')">📄 Generar Acta PDF</button></div></div></div>`);
+    setTimeout(() => { iniciarFirmaCanvasD1('d1FirmaCanvas'); }, 100);
+}
+
+// ============================================
+// EXPORTAR ACTA D1 - GENERA EL PDF FINAL
+// ============================================
+async function exportarActaD1(eid, consecutivo) {
+    const e = getEq(eid);
+    const tienda = getTiendaD1(e?.idTienda);
+    const idServicio = document.getElementById('d1IdServicio')?.value?.trim() || '';
+    const tipoMant = document.querySelector('input[name="d1TipoMant"]:checked')?.value || 'Preventivo';
+    const especialidadesSel = Array.from(document.querySelectorAll('.d1Especialidad:checked')).map(cb => cb.value);
+    const equiposSel = Array.from(document.querySelectorAll('.d1TipoEquipo:checked')).map(cb => cb.value);
+    const falla = document.getElementById('d1Falla')?.value?.trim() || '';
+    const trabajo = document.getElementById('d1Trabajo')?.value?.trim() || '';
+    const entrega = document.getElementById('d1Entrega')?.value?.trim() || '';
+    const estado = document.querySelector('input[name="d1Estado"]:checked')?.value || 'Operativo';
+    const observaciones = document.getElementById('d1Observaciones')?.value?.trim() || '';
+    const funcNombre = document.getElementById('d1FuncNombre')?.value?.trim() || '';
+    const funcId = document.getElementById('d1FuncId')?.value?.trim() || '';
+    if (!idServicio) { toast('⚠️ Ingresa el ID de Servicio'); return; }
+    if (!falla) { toast('⚠️ Describe la falla encontrada'); return; }
+    if (!trabajo) { toast('⚠️ Describe el trabajo realizado'); return; }
+    if (!entrega) { toast('⚠️ Describe cómo lo entrega'); return; }
+    if (!funcNombre) { toast('⚠️ Ingresa el nombre del funcionario D1'); return; }
+    if (!funcId) { toast('⚠️ Ingresa la identificación del funcionario'); return; }
+    const fotosBase64 = [];
+    for (let i = 0; i < fotosD1.length; i++) {
+        fotosBase64.push(fotosD1[i] ? await comprimirImagenD1(fotosD1[i]) : '');
+    }
+    // Guardar en Firestore
+    try {
+        await addDoc(collection(db, 'servicios'), {
+            equipoId: eid, tipo: tipoMant, fecha: new Date().toISOString().split('T')[0],
+            tecnico: sesionActual?.nombre || '', descripcion: `[D1] ${falla} | ${trabajo} | ${entrega} | Estado: ${estado}`,
+            proximoMantenimiento: null, fotos: fotosBase64.filter(f=>f),
+            consecutivoD1: consecutivo, idServicioD1: idServicio,
+            especialidades: especialidadesSel, equipos: equiposSel, falla,
+            trabajoRealizado: trabajo, condicionEntrega: entrega, estadoEntrega: estado,
+            observaciones, funcionarioNombre: funcNombre, funcionarioId: funcId, idTienda: e?.idTienda || ''
+        });
+        await updateDoc(doc(db,'equipos',eid),{estado: estado}); toast('✅ Servicio D1 guardado'); await cargarDatos();
+    } catch (err) { toast('⚠️ Error guardando: ' + err.message); }
+    // Firma canvas funcionario D1
+    const firmaCanvas = document.getElementById('d1FirmaCanvas');
+    if (firmaCanvas) d1FirmaDataUrl = firmaCanvas.toDataURL('image/png');
+    // Sello D1
+    let selloUrl = '';
+    try { selloUrl = await generarSelloD1(tienda?.tienda || e?.ubicacion || 'D1'); } catch(err) { console.warn(err); }
+    // Fecha
+    const hoy = new Date();
+    const dd = String(hoy.getDate()).padStart(2,'0');
+    const MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const mes = MESES_ES[hoy.getMonth()];
+    const aa = String(hoy.getFullYear());
+    // Firma técnico — canvas con fuente Meddon (igual que Acta_D1_Kryotec_v3.html)
+    let firmaTecBase64 = '';
+    try {
+        firmaTecBase64 = await new Promise(resolve => {
+            const font = new FontFace('Meddon', 'url(https://raw.githubusercontent.com/capacitADA/JDARQ/main/Meddon-Regular.ttf)');
+            font.load().then(loaded => {
+                document.fonts.add(loaded);
+                const c = document.createElement('canvas'); c.width = 280; c.height = 54;
+                const ctx = c.getContext('2d');
+                ctx.font = '28px Meddon'; ctx.fillStyle = '#111';
+                ctx.fillText(sesionActual?.nombre || '', 6, 40);
+                resolve(c.toDataURL('image/png'));
+            }).catch(() => {
+                const c = document.createElement('canvas'); c.width = 280; c.height = 54;
+                const ctx = c.getContext('2d');
+                ctx.font = 'italic 22px Georgia'; ctx.fillStyle = '#111';
+                ctx.fillText(sesionActual?.nombre || '', 6, 38);
+                resolve(c.toDataURL('image/png'));
+            });
+        });
+    } catch(err) { console.warn(err); }
+    // Firma garabato funcionario D1 (si no hay canvas)
+    let firmaFunBase64 = d1FirmaDataUrl || '';
+    if (!firmaFunBase64) {
+        const gc = document.createElement('canvas'); gc.width = 180; gc.height = 44;
+        const gctx = gc.getContext('2d');
+        gctx.strokeStyle = '#111'; gctx.lineWidth = 1.8; gctx.lineCap = 'round';
+        gctx.beginPath();
+        gctx.moveTo(10,32); gctx.bezierCurveTo(35,8,55,36,80,22);
+        gctx.bezierCurveTo(100,10,115,34,140,28);
+        gctx.bezierCurveTo(150,24,160,30,170,26);
+        gctx.stroke();
+        firmaFunBase64 = gc.toDataURL('image/png');
+    }
+    const html = generarHtmlActaD1PDF({ consecutivo, idServicio, tienda, e, tipoMant,
+        especialidadesSel, equiposSel, falla, trabajo, entrega, estado, observaciones,
+        funcNombre, funcId, selloUrl, dd, mes, aa, fotosBase64, firmaTecBase64, firmaFunBase64 });
+    const nombreArch = `Acta_D1_${consecutivo}_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}`;
+    driveUploadPDF(html, nombreArch + '.pdf').catch(err => console.warn('Drive:', err));
+    toast('⏳ Generando PDF...');
+    try {
+        // Cargar librerías si no están
+        await Promise.all([
+            window.html2canvas ? Promise.resolve() : new Promise((res,rej) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+                s.onload = res; s.onerror = rej; document.head.appendChild(s);
+            }),
+            window.jspdf ? Promise.resolve() : new Promise((res,rej) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                s.onload = res; s.onerror = rej; document.head.appendChild(s);
+            })
+        ]);
+        await new Promise(r => setTimeout(r, 300));
+        // Renderizar el HTML completo en iframe oculto para preservar los estilos del <head>
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;height:1200px;border:none;z-index:-1;';
+        document.body.appendChild(iframe);
+        iframe.contentDocument.open();
+        iframe.contentDocument.write(html);
+        iframe.contentDocument.close();
+        await document.fonts.ready;
+        await new Promise(r => setTimeout(r, 1200));
+        const canvas = await window.html2canvas(iframe.contentDocument.body, {
+            scale: 2.5, backgroundColor: '#ffffff', useCORS: true,
+            allowTaint: true, logging: false, windowWidth: 794
+        });
+        document.body.removeChild(iframe);
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+        const imgW = 210;
+        const imgH = (canvas.height * imgW) / canvas.width;
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, imgW, imgH);
+        pdf.save(nombreArch + '.pdf');
+        toast('✅ PDF descargado');
+    } catch(pdfErr) {
+        console.error('PDF error:', pdfErr);
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = nombreArch + '.html'; a.click();
+        URL.revokeObjectURL(url);
+        toast('⚠️ PDF falló — descargado como HTML');
+    }
+    closeModal();
+}
+
+// ============================================
+// GENERAR HTML DEL PDF DEL ACTA D1 - SECCIONES 1 A 8
+// ============================================
+function generarHtmlActaD1PDF(data) {
+    const { consecutivo, idServicio, tienda, e, tipoMant, especialidadesSel, equiposSel,
+            falla, trabajo, entrega, estado, observaciones, funcNombre, funcId,
+            selloUrl, dd, mes, aa, fotosBase64, firmaTecBase64, firmaFunBase64 } = data;
+    const tecNombre = sesionActual?.nombre || '';
+    const tecCedula = sesionActual?.cedula  || '';
+    const nombreTienda = tienda?.tienda || e?.ubicacion || '';
+    function fmtCed(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+    function chk(val, lista) {
+        return lista.includes(val)
+            ? '<span style="font-size:12pt;">&#9632;</span>'
+            : '<span style="font-size:10pt;">&#9744;</span>';
+    }
+    const descLines = [
+        ...(falla.split('\n').concat(['','','','','']).slice(0,5)),
+        ...(trabajo.split('\n').concat(['','','','','']).slice(0,5)),
+        ...(entrega.split('\n').concat(['','']).slice(0,2)),
+        `Estado final del equipo: ${estado}`, ''
+    ];
+    const lineRows = descLines.map((t,i) => {
+        const isLast = i === descLines.length - 1;
+        return `<tr class="${isLast ? 'rl-last' : 'rl'}"><td>${t}&nbsp;</td></tr>`;
+    }).join('');
+    const obsLines = observaciones.split('\n').concat(['','','','','']).slice(0,5);
+    const obsRows = obsLines.map((t,i,a) =>
+        `<tr class="${i===a.length-1 ? 'rl-last' : 'rl'}"><td>${t}&nbsp;</td></tr>`
+    ).join('');
+    return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Acta_D1_${consecutivo}</title>
+<style>
+@font-face { font-family:'Meddon'; src:url('https://raw.githubusercontent.com/capacitADA/JDARQ/main/Meddon-Regular.ttf') format('truetype'); }
+body { font-family:Arial,sans-serif; background:#fff; padding:14px 16px; font-size:7.5pt; line-height:1.2; box-sizing:border-box; width:794px; margin:0; }
+.bloque { border:2px solid #000; border-collapse:collapse; width:100%; margin-top:-2px; }
+.bloque td,.bloque th { border:1px solid #000; padding:2px 5px; vertical-align:bottom; font-size:7.5pt; white-space:nowrap; }
+.hd { font-weight:700; text-align:center; font-size:9pt; padding:3px; background:transparent; }
+.lbl { white-space:nowrap; font-weight:700; width:1px; }
+.rl td { border-left:2px solid #000; border-right:2px solid #000; border-top:none; border-bottom:1px solid #aaa; height:9px; padding:0 4px 0px 4px; font-size:8.5pt; vertical-align:bottom; white-space:normal; overflow:hidden; }
+.rl-last td { border-left:2px solid #000; border-right:2px solid #000; border-top:none; border-bottom:2px solid #000; height:9px; padding:0 4px 0px 4px; font-size:8.5pt; vertical-align:bottom; white-space:normal; overflow:hidden; }
+.nota { color:#e4002b; font-size:5.5pt; text-align:center; margin-top:4px; font-style:italic; }
+</style>
+</head>
+<body>
+
+<!-- CABECERA -->
+<table class="bloque" style="border:none;margin-bottom:3px;">
+  <tr>
+    <td style="border:none;padding:0 6px 0 0;vertical-align:middle;width:55px;">
+      <img src="https://raw.githubusercontent.com/capacitADA/JDARQ/main/Logo_D1.png" style="height:38px;">
+    </td>
+    <td style="border:none;text-align:center;vertical-align:middle;">
+      <strong style="font-size:9.5pt;">ACTA DE ENTREGA SERVICIOS DE MANTENIMIENTO REGIONAL SANTANDER</strong>
+    </td>
+    <td style="border:none;text-align:right;vertical-align:middle;white-space:nowrap;">
+      FECHA &nbsp;<span style="border:1px solid #000;padding:1px 5px;margin-right:-1px;">${dd}</span><span style="border:1px solid #000;padding:1px 5px;margin-right:-1px;">${mes}</span><span style="border:1px solid #000;padding:1px 5px;">${aa}</span>
+    </td>
+  </tr>
+</table>
+
+<!-- DATOS DEL PROVEEDOR -->
+<table class="bloque">
+  <tr><td colspan="4" class="hd" style="font-size:10pt;">DATOS DEL PROVEEDOR</td></tr>
+  <tr>
+    <td class="lbl">NOMBRE:</td><td style="font-weight:700;width:auto;">JD Arquisoluciones S.A.S</td>
+    <td class="lbl">NIT:</td><td style="width:auto;">901.223.583-8</td>
+  </tr>
+  <tr>
+    <td class="lbl">CONSECUTIVO:</td><td style="font-weight:700;color:#e4002b;">${consecutivo}</td>
+    <td class="lbl"># COTIZACION:</td><td></td>
+  </tr>
+  <tr>
+    <td class="lbl">TIENDA (CEDI):</td><td>${nombreTienda}</td>
+    <td class="lbl">ID DEL SERVICIO:</td><td>${idServicio}</td>
+  </tr>
+</table>
+
+<!-- TIPO DE SERVICIO -->
+<table class="bloque" style="margin-top:-2px;">
+  <tr><td class="hd" style="font-size:10pt;">TIPO DE SERVICIO SOLICITADO</td></tr>
+</table>
+<table class="bloque" style="margin-top:-2px;">
+  <tr>
+    <td class="lbl">TIPO DE MANTENIMIENTO: <em>MARQUE X</em></td>
+    <td>Preventivo ${chk('Preventivo',[tipoMant])}</td>
+    <td>Correctivo ${chk('Correctivo',[tipoMant])}</td>
+    <td>Emergencia ${chk('Emergencia',[tipoMant])}</td>
+  </tr>
+</table>
+<table class="bloque" style="margin-top:-2px;">
+  <tr>
+    <td class="lbl">ESPECIALIDAD: <em>MARQUE X</em></td>
+    <td>Civil ${chk('Civil',especialidadesSel)}</td>
+    <td>El&eacute;ctrico ${chk('El\u00e9ctrico',especialidadesSel)}</td>
+    <td>Metalmec&aacute;nico ${chk('Metalmec\u00e1nico',especialidadesSel)}</td>
+    <td>Refrigeraci&oacute;n ${chk('Refrigeraci\u00f3n',especialidadesSel)}</td>
+    <td>Plomer&iacute;a ${chk('Plomer\u00eda',especialidadesSel)}</td>
+    <td>Cerrajer&iacute;a ${chk('Cerrajer\u00eda',especialidadesSel)}</td>
+    <td>Otro ${chk('Otro',especialidadesSel)}</td>
+  </tr>
+</table>
+<table class="bloque" style="margin-top:-2px;">
+  <tr>
+    <td class="lbl">INFORMACION DEL EQUIPO: <em>MARQUE X</em></td>
+    <td>Nevera ${chk('Nevera',equiposSel)}</td>
+    <td>Aire acondicionado ${chk('Aire acondicionado',equiposSel)}</td>
+    <td>Congelador ${chk('Congelador',equiposSel)}</td>
+    <td>Cortina de aire ${chk('Cortina de aire',equiposSel)}</td>
+    <td>Otro ${chk('Otro',equiposSel)}</td>
+  </tr>
+</table>
+
+<!-- DESCRIPCION -->
+<table class="bloque" style="margin-top:-2px;">
+  <tr><td class="hd" style="font-size:10pt;">DESCRIPCION DEL SERVICIO EJECUTADO</td></tr>
+</table>
+<table style="width:100%;border-collapse:collapse;">${lineRows}</table>
+
+<!-- EVIDENCIAS -->
+<table class="bloque" style="margin-top:-2px;">
+  <tr><td colspan="2" class="hd" style="font-size:10pt;">EVIDENCIAS (FOTOGRAFIAS)</td></tr>
+  <tr>
+    <td style="width:50%;text-align:center;font-weight:700;padding:2px;">ANTES</td>
+    <td style="width:50%;text-align:center;font-weight:700;padding:2px;">DESPUES</td>
+  </tr>
+  <tr>
+    <td style="height:200px;text-align:center;vertical-align:middle;">${fotosBase64[0] ? `<img src="${fotosBase64[0]}" style="max-width:100%;max-height:195px;">` : '&nbsp;'}</td>
+    <td style="height:200px;text-align:center;vertical-align:middle;">${fotosBase64[1] ? `<img src="${fotosBase64[1]}" style="max-width:100%;max-height:195px;">` : '&nbsp;'}</td>
+  </tr>
+</table>
+
+<!-- OBSERVACIONES -->
+<table class="bloque" style="margin-top:-2px;">
+  <tr><td class="hd" style="font-size:10pt;">OBSERVACIONES O RECOMENDACIONES</td></tr>
+</table>
+<table style="width:100%;border-collapse:collapse;">${obsRows}</table>
+
+<!-- ENTREGA A SATISFACCION -->
+<table class="bloque" style="margin-top:-2px;">
+  <tr><td colspan="4" class="hd" style="font-size:10pt;">ENTREGA A SATISFACCION D1 SAS</td></tr>
+  <tr>
+    <td colspan="2" style="width:50%;text-align:center;height:65px;vertical-align:middle;">SELLO</td>
+    <td colspan="2" style="width:50%;text-align:center;vertical-align:middle;">
+      ${selloUrl ? `<img src="${selloUrl}" style="max-height:62px;">` : '&nbsp;'}
+    </td>
+  </tr>
+  <tr>
+    <td class="lbl">FIRMA (PROVEEDOR)</td>
+    <td>${firmaTecBase64 ? `<img src="${firmaTecBase64}" style="height:30px;">` : '&nbsp;'}</td>
+    <td class="lbl">FIRMA (D1 SAS)</td>
+    <td>${firmaFunBase64 ? `<img src="${firmaFunBase64}" style="max-height:28px;max-width:130px;">` : '&nbsp;'}</td>
+  </tr>
+  <tr>
+    <td class="lbl">NOMBRE COMPLETO</td><td>${tecNombre}</td>
+    <td class="lbl">NOMBRE COMPLETO</td><td>${funcNombre}</td>
+  </tr>
+  <tr>
+    <td class="lbl">IDENTIFICACION</td><td>${fmtCed(tecCedula)}</td>
+    <td class="lbl">IDENTIFICACION</td><td>${fmtCed(funcId)}</td>
+  </tr>
+</table>
+<div class="nota">Nota: Se debe diligenciar los campos de firma clara y legible, sin tachones y enmendados; este documento debe entregarse diligenciado en su totalidad de lo contrario no ser&aacute; v&aacute;lido</div>
+
+</body>
+</html>`;
+}
+
+// ============================================
+// MODAL QR Y MANEJO DE RUTA QR (SIMPLIFICADOS)
+// ============================================
+function modalQR(eid) {
+    const e = getEq(eid); const c = getCl(e?.clienteId);
+    const esD1c = esClienteD1(e?.clienteId);
+    const tienda = esD1c ? getTiendaD1(e?.idTienda) : null;
+    const nombreTienda = tienda?.tienda || c?.nombre || '';
+    const url = `${window.location.origin}${window.location.pathname}#/equipo/${eid}`;
+    const LOGO = 'https://raw.githubusercontent.com/capacitADA/JDARQ/main/JDARQ-logo.png';
+    const linea1 = `${e?.tipo||''} ${e?.marca||''} ${e?.modelo||''}`.trim();
+    const qrDiv = document.createElement('div');
+    qrDiv.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:260px;height:260px;';
+    document.body.appendChild(qrDiv);
+    new window.QRCode(qrDiv, { text: url, width: 260, height: 260 });
+    setTimeout(async () => {
+        const qrDataUrl = qrDiv.querySelector('canvas').toDataURL('image/png');
+        document.body.removeChild(qrDiv);
+        const logoImg = new Image(); logoImg.crossOrigin='Anonymous'; logoImg.src=LOGO;
+        const qrImg = new Image(); qrImg.src=qrDataUrl;
+        await Promise.all([
+            new Promise(r=>{ logoImg.onload=r; logoImg.onerror=r; }),
+            new Promise(r=>{ qrImg.onload=r; })
+        ]);
+        const W=300, pad=14, R=16, logoH=40, strip1=52, qrS=240, strip2=48;
+        const H = pad+logoH+pad+strip1+qrS+strip2+pad;
+        const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+        const ctx=cv.getContext('2d');
+        ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,H);
+        ctx.strokeStyle='#0c214a'; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.roundRect(1.5,1.5,W-3,H-3,R); ctx.stroke();
+        if(logoImg.naturalWidth){
+            const lw=logoImg.naturalWidth*(logoH/logoImg.naturalHeight);
+            ctx.drawImage(logoImg,(W-lw)/2,pad,lw,logoH);
+        }
+        const s1y=pad+logoH+pad;
+        ctx.fillStyle='#0c214a'; ctx.fillRect(0,s1y,W,strip1);
+        ctx.fillStyle='#ffffff'; ctx.textAlign='center';
+        ctx.font='bold 14px Arial'; ctx.fillText(linea1,W/2,s1y+20);
+        ctx.font='12px Arial'; ctx.fillText(nombreTienda,W/2,s1y+38);
+        ctx.drawImage(qrImg,(W-qrS)/2,s1y+strip1,qrS,qrS);
+        const s2y=s1y+strip1+qrS;
+        ctx.fillStyle='#0c214a';
+        ctx.beginPath(); ctx.roundRect(0,s2y,W,strip2+pad,[0,0,R,R]); ctx.fill();
+        ctx.fillStyle='#ffffff'; ctx.font='bold 17px Arial'; ctx.textAlign='center';
+        ctx.fillText('☎  3105533937',W/2,s2y+strip2/2+6);
+        const finalUrl=cv.toDataURL('image/png');
+        showModal(`<div class="modal" style="max-width:340px;"><div class="modal-h"><h3>📱 Código QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${finalUrl}" style="width:100%;border-radius:12px;"><div style="margin-top:10px;"><a href="${finalUrl}" download="QR_${e?.marca||''}_${e?.modelo||''}.png" class="btn btn-blue btn-full">⬇️ Descargar QR</a></div></div></div>`);
+    }, 250);
+}
+
+
+
+// ============================================
+// CRUD CLIENTES, EQUIPOS, TECNICOS
+// ============================================
+function modalNuevoCliente(){ showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo cliente</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre *</label><input class="fi" id="cNombre"><label class="fl">Telefono *</label><input class="fi" id="cTel"><label class="fl">Email</label><input class="fi" id="cEmail"><label class="fl">Ciudad *</label><select class="fi" id="cCiudad">${CIUDADES.map(c=>`<option>${c}</option>`).join('')}</select><label class="fl">Direccion *</label><input class="fi" id="cDir"><button class="btn btn-blue btn-full" onclick="obtenerGPS()">📍 Compartir ubicacion</button><input type="hidden" id="cLat"><input type="hidden" id="cLng"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarCliente()">Guardar</button></div></div></div>`); }
+function obtenerGPS(){ if(!navigator.geolocation){ toast('⚠️ GPS no disponible'); return; } navigator.geolocation.getCurrentPosition(pos=>{ document.getElementById('cLat').value=pos.coords.latitude.toFixed(6); document.getElementById('cLng').value=pos.coords.longitude.toFixed(6); toast('✅ Ubicacion capturada'); },()=>toast('⚠️ No se pudo obtener GPS')); }
+async function guardarCliente(){ const n=document.getElementById('cNombre')?.value?.trim(); const t=document.getElementById('cTel')?.value?.trim(); const ci=document.getElementById('cCiudad')?.value; const d=document.getElementById('cDir')?.value?.trim(); if(!n||!t||!ci||!d){ toast('⚠️ Complete campos obligatorios'); return; } try{ await addDoc(collection(db,'clientes'),{ nombre:n, telefono:t, ciudad:ci, direccion:d, email:document.getElementById('cEmail')?.value||'', latitud:document.getElementById('cLat')?.value||null, longitud:document.getElementById('cLng')?.value||null, fechaCreacion:new Date().toISOString().split('T')[0] }); closeModal(); await cargarDatos(); toast('✅ Cliente guardado'); }catch(err){ toast('❌ Error: '+err.message); } }
+function modalEditarCliente(cid){ const c=getCl(cid); showModal(`<div class="modal"><div class="modal-h"><h3>Editar cliente</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre</label><input class="fi" id="eNombre" value="${c.nombre}"><label class="fl">Telefono</label><input class="fi" id="eTel" value="${c.telefono}"><label class="fl">Email</label><input class="fi" id="eEmail" value="${c.email||''}"><label class="fl">Ciudad</label><select class="fi" id="eCiudad">${CIUDADES.map(ci=>`<option ${ci===c.ciudad?'selected':''}>${ci}</option>`).join('')}</select><label class="fl">Direccion</label><input class="fi" id="eDir" value="${c.direccion}"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarCliente('${cid}')">Guardar</button></div></div></div>`); }
+async function actualizarCliente(cid){ try{ await updateDoc(doc(db,'empresas',cid),{ nombre:document.getElementById('eNombre').value, telefono:document.getElementById('eTel').value, email:document.getElementById('eEmail').value, ciudad:document.getElementById('eCiudad').value, direccion:document.getElementById('eDir').value }); closeModal(); await cargarDatos(); toast('✅ Cliente actualizado'); }catch(err){ toast('❌ Error: '+err.message); } }
+function modalEliminarCliente(cid){ if(!confirm('¿Eliminar este cliente y todos sus activos/servicios?')) return; eliminarCliente(cid); }
+async function eliminarCliente(cid){ const eids=getEquiposCliente(cid).map(e=>e.id); try{ for(const eid of eids){ const ss=getServiciosEquipo(eid); for(const s of ss) await deleteDoc(doc(db,'servicios',s.id)); await deleteDoc(doc(db,'equipos',eid)); } await deleteDoc(doc(db,'empresas',cid)); await cargarDatos(); goTo('clientes'); toast('🗑️ Cliente eliminado'); }catch(err){ toast('❌ Error: '+err.message); } }
+function modalNuevoEquipo(cid, tid){
+    tid = tid || selectedTiendaId;
+    const t = tiendas.find(x=>x.id===tid);
+    showModal(`<div class="modal">
+      <div class="modal-h"><h3>Nuevo activo</h3><button class="xbtn" onclick="closeModal()">&#x2715;</button></div>
+      <div class="modal-b">
+        <div style="background:var(--bg2);padding:8px;border-radius:var(--radius);font-size:.78rem;margin-bottom:10px;">
+          <strong>${t?.nombre||''}</strong> &nbsp;·&nbsp; ${t?.municipio||''}
+        </div>
+        <label class="fl">Nombre del activo *</label>
+        <input class="fi" id="eqNombre" placeholder="Ej: Cielo raso, Puerta de muelle, Tablero eléctrico">
+        <label class="fl">Descripción</label>
+        <input class="fi" id="eqDesc" placeholder="Detalle específico (opcional)">
+        <div class="modal-foot">
+          <button class="btn btn-gray" onclick="closeModal()">Cancelar</button>
+          <button class="btn btn-blue" onclick="guardarEquipo('${cid}','${tid}')">Guardar</button>
+        </div>
+      </div>
+    </div>`);
+}
+
+
+function modalEditarEquipo(eid){
+    const e = getEq(eid);
+    showModal(`<div class="modal">
+      <div class="modal-h"><h3>Editar activo</h3><button class="xbtn" onclick="closeModal()">&#x2715;</button></div>
+      <div class="modal-b">
+        <label class="fl">Nombre del activo *</label>
+        <input class="fi" id="eqNombre" value="${e?.nombre||''}">
+        <label class="fl">Descripción</label>
+        <input class="fi" id="eqDesc" value="${e?.descripcion||''}">
+        <div class="modal-foot">
+          <button class="btn btn-gray" onclick="closeModal()">Cancelar</button>
+          <button class="btn btn-blue" onclick="actualizarEquipo('${eid}')">Actualizar</button>
+        </div>
+      </div>
+    </div>`);
+}
+
+
+function modalEliminarEquipo(eid){ if(!confirm('¿Eliminar este activo y sus servicios?')) return; eliminarEquipo(eid); }
+async function eliminarEquipo(eid){ const ss=getServiciosEquipo(eid); try{ for(const s of ss) await deleteDoc(doc(db,'servicios',s.id)); await deleteDoc(doc(db,'equipos',eid)); await cargarDatos(); toast('🗑️ Activo eliminado'); }catch(err){ toast('❌ Error: '+err.message); } }
+function modalNuevoTecnico(){ showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo tecnico</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre *</label><input class="fi" id="tNombre"><div class="fr"><div><label class="fl">Tipo Doc</label><select class="fi" id="tTipoDoc">${TIPOS_DOC.map(d=>`<option>${d}</option>`).join('')}</select></div><div><label class="fl">Cedula *</label><input class="fi" id="tCedula" type="number"></div></div><label class="fl">Telefono</label><input class="fi" id="tTel"><label class="fl">Cargo</label><input class="fi" id="tCargo"><label class="fl">Rol</label><select class="fi" id="tRol"><option value="tecnico">Tecnico</option><option value="admin">Admin</option></select><label class="fl">Clave (4 digitos) *</label><input class="fi" id="tClave" type="password" maxlength="4"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarTecnico()">Guardar</button></div></div></div>`); }
+async function guardarTecnico(){ const n=document.getElementById('tNombre')?.value?.trim(); const cc=document.getElementById('tCedula')?.value?.trim(); const cl=document.getElementById('tClave')?.value?.trim(); if(!n||!cc||!cl){ toast('⚠️ Nombre, cedula y clave requeridos'); return; } if(cl.length!==4){ toast('⚠️ Clave de 4 digitos'); return; } try{ await addDoc(collection(db,'tecnicos'),{ nombre:n, cedula:cc, tipoDoc:document.getElementById('tTipoDoc')?.value||'CC', telefono:document.getElementById('tTel')?.value||'', cargo:document.getElementById('tCargo')?.value||'', rol:document.getElementById('tRol')?.value||'tecnico', especialidades:[], region:'', clave:cl }); closeModal(); await cargarDatos(); toast('✅ Tecnico guardado'); }catch(err){ toast('❌ Error: '+err.message); } }
+function modalEditarTecnico(tid){ const t=getTec(tid); showModal(`<div class="modal"><div class="modal-h"><h3>Editar tecnico</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre</label><input class="fi" id="etNombre" value="${t.nombre}"><label class="fl">Cedula</label><input class="fi" id="etCedula" value="${t.cedula}"><label class="fl">Telefono</label><input class="fi" id="etTel" value="${t.telefono}"><label class="fl">Cargo</label><input class="fi" id="etCargo" value="${t.cargo||''}"><label class="fl">Rol</label><select class="fi" id="etRol"><option value="tecnico" ${t.rol==='tecnico'?'selected':''}>Tecnico</option><option value="admin" ${t.rol==='admin'?'selected':''}>Admin</option></select><label class="fl">Nueva clave (opcional)</label><input class="fi" id="etClave" type="password" maxlength="4"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarTecnico('${tid}')">Guardar</button></div></div></div>`); }
+async function actualizarTecnico(tid){ const data={ nombre:document.getElementById('etNombre').value, cedula:document.getElementById('etCedula').value, telefono:document.getElementById('etTel').value, cargo:document.getElementById('etCargo').value, rol:document.getElementById('etRol').value }; const newClave=document.getElementById('etClave')?.value?.trim(); if(newClave&&newClave.length===4) data.clave=newClave; try{ await updateDoc(doc(db,'tecnicos',tid),data); closeModal(); await cargarDatos(); toast('✅ Tecnico actualizado'); }catch(err){ toast('❌ Error: '+err.message); } }
+async function eliminarTecnico(tid){ if(!confirm('¿Eliminar este tecnico?')) return; try{ await deleteDoc(doc(db,'tecnicos',tid)); await cargarDatos(); toast('🗑️ Tecnico eliminado'); }catch(err){ toast('❌ Error: '+err.message); } }
+
+// ============================================
+// MODALES JMC Y RO (STUBS PARA NO ROMPER REFERENCIAS)
+// ============================================
+function modalInformeJMC(eid) {
+    const e = getEq(eid);
+    const hoy = new Date().toISOString().split('T')[0];
+    const sapActual = e?.ubicacion;
+    const tienda = getTiendaJMC(sapActual);
+    const dd = hoy.split('-')[2], mm = hoy.split('-')[1], aa = hoy.split('-')[0].slice(2);
+
+    showModal(`<div class="modal modal-wide"><div class="modal-h" style="background:#1e3a6e;"><h3>📋 Informe Jeronimo Martins — FF-JMC-DT-06</h3><button class="xbtn" onclick="closeModal()">✕</button></div>
+        <div class="modal-b">
+            <div style="background:#0c214a;color:white;text-align:center;padding:4px;margin-bottom:6px;border-radius:4px;">CONTRATISTA</div>
+            <div class="fr"><div><label class="fl">Razon social</label><input class="fi" value="CONSTRUCIONES ARQUITECTONICAS RO S.A.S" readonly></div><div><label class="fl">NIT</label><input class="fi" value="900.796.928-1" readonly></div></div>
+            <div class="fr"><div><label class="fl">Contacto</label><input class="fi" value="Harrison Rincon" readonly></div><div><label class="fl">Telefono</label><input class="fi" value="314 3740477" readonly></div></div>
+            <div style="background:#0c214a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">SOLICITANTE Y TIENDA</div>
+            <div class="fr"><div><label class="fl">Nombre solicitante</label><input class="fi" id="jNombreSol" value="${tienda?.coordinador||''}" readonly></div><div><label class="fl">Cargo</label><input class="fi" id="jCargo" value="${tienda?.cargo||''}" readonly></div></div>
+            <div class="fr"><div><label class="fl">Nombre tienda</label><input class="fi" id="jTienda" value="${tienda?.tienda||''}" readonly></div><div><label class="fl">N° Tienda (SAP)</label><input class="fi" id="jSAP" value="${sapActual||''}" readonly></div></div>
+            
+<div class="fr"><div><label class="fl">N° Ticket</label>
+<input class="fi" id="jTicket" placeholder="TK-..." style="background-color: #f0d759;"></div>
+<div><label class="fl">Fecha</label><div style="display:flex;gap:4px;"><input class="fi" id="jDD" placeholder="DD" value="${dd}" style="width:33%;"><input class="fi" id="jMM" placeholder="MM" value="${mm}" style="width:33%;"><input class="fi" id="jAA" placeholder="AA" value="${aa}" style="width:33%;"></div></div></div>
+            <div class="fr"><div><label class="fl">Municipio</label><input class="fi" id="jMunicipio" value="${tienda?.ciudad||''}" readonly></div><div><label class="fl">Departamento</label><input class="fi" id="jDepartamento" value="${tienda?.departamento||''}" readonly></div></div>
+            <div style="background:#0c214a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">INFORMACION TECNICA</div>
+            
+<div class="fr"><div><label class="fl">Nombre del equipo</label><input class="fi" id="jEquipo" value="${e?.tipo ? e.tipo + ' ' : ''}${e?.modelo||''}" readonly></div>
+
+<div><label class="fl">Marca</label><input class="fi" id="jMarca" value="${e?.marca||''}" readonly></div></div>
+            <div><label class="fl">Serial</label><input class="fi" id="jSerial" value="${e?.serie||''}" readonly></div>
+            <div style="background:#0c214a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">TIPO DE ASISTENCIA</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">${['Reparacion','Garantia','Ajuste','Modificacion','Servicio','Mejora','Combinacion'].map(t=>`<label><input type="radio" name="jTipoAsi" value="${t}" ${t==='Reparacion'?'checked':''}> ${t}</label>`).join('')}</div>
+            <div style="background:#0c214a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">TIPO DE FALLA</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">${['Mecanicas','Material','Instrumentos','Electricas','Influencia Externa'].map(t=>`<label><input type="radio" name="jTipoFalla" value="${t}"> ${t}</label>`).join('')}</div>
+            <div style="background:#0c214a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">CAUSA DE FALLAS</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">${['Diseno','Fabricacion/Instalacion','Operacion/Mantenimiento','Administracion','Desconocida'].map(t=>`<label><input type="radio" name="jCausa" value="${t}"> ${t}</label>`).join('')}</div>
+            <label class="fl">Descripcion de la falla</label><textarea class="fi" id="jDescFalla" rows="2"></textarea>
+            <label class="fl">Diagnostico del tecnico</label><textarea class="fi" id="jDiag" rows="3"></textarea>
+            <label class="fl">Repuestos cambiados</label><textarea class="fi" id="jRepuestos" rows="2"></textarea>
+            <label class="fl">Observaciones</label><textarea class="fi" id="jObs" rows="2"></textarea>
+            <div style="background:#0c214a;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">CONSTANCIA</div>
+            <div class="fr"><div><label class="fl">Tecnico encargado</label><input class="fi" value="${sesionActual?.nombre||''}" readonly></div><div><label class="fl">Cedula</label><input class="fi" value="${sesionActual?.cedula||''}" readonly></div></div>
+            <div class="fr"><div><label class="fl">Hora entrada</label><input class="fi" type="time" id="jHEntrada"></div><div><label class="fl">Hora salida</label><input class="fi" type="time" id="jHSalida"></div></div>
+            <div class="fr"><div><label class="fl">Nombre funcionario</label><input class="fi" id="jFuncNombre"></div><div><label class="fl">Cedula</label><input class="fi" id="jFuncCedula"></div></div>
+            <div class="fr"><div><label class="fl">Cargo</label><input class="fi" id="jFuncCargo"></div><div><label class="fl">SAP</label><input class="fi" id="jFuncSAP"></div></div>
+            <label class="fl">Firma</label>
+            <canvas id="jFirmaCanvas" width="300" height="80" style="width:100%;height:80px;border:1.5px dashed var(--green);border-radius:8px;background:#f0faf5;"></canvas>
+            <button class="btn btn-gray btn-sm" onclick="limpiarFirmaJMC()">🗑 Limpiar firma</button>
+            <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="exportarInformeJMC('${eid}')">📄 Exportar PDF</button></div>
+        </div>
+    </div>`);
+    setTimeout(() => iniciarFirmaCanvas('jFirmaCanvas'), 100);
+}
+function modalInformeRO(eid) {
+    const e = getEq(eid);
+    const hoy = new Date().toISOString().split('T')[0];
+    const dd = hoy.split('-')[2], mm = hoy.split('-')[1], aa = hoy.split('-')[0].slice(2);
+
+    showModal(`<div class="modal modal-wide"><div class="modal-h" style="background:#1565c0;"><h3>📋 Informe Tecnico — Construciones RO</h3><button class="xbtn" onclick="closeModal()">✕</button></div>
+        <div class="modal-b">
+            <div style="background:#1976d2;color:white;text-align:center;padding:4px;margin-bottom:6px;border-radius:4px;">CONTRATISTA</div>
+            <div class="fr"><div><label class="fl">Razon social</label><input class="fi" value="CONSTRUCIONES ARQUITECTONICAS RO S.A.S" readonly></div><div><label class="fl">NIT</label><input class="fi" value="900.796.928-1" readonly></div></div>
+            <div class="fr"><div><label class="fl">Contacto</label><input class="fi" value="Harrison Rincon" readonly></div><div><label class="fl">Telefono</label><input class="fi" value="314 3740477" readonly></div></div>
+            <div style="background:#1976d2;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">CLIENTE</div>
+            <div class="fr"><div><label class="fl">Empresa</label><input class="fi" value="Construciones Arquitectonicas RO" readonly></div><div><label class="fl">NIT</label><input class="fi" value="900.796.928-1" readonly></div></div>
+            <div class="fr"><div><label class="fl">Contacto</label><input class="fi" value="Harrison Rincon" readonly></div><div><label class="fl">Celular</label><input class="fi" value="314 3740477" readonly></div></div>
+            <div class="fr"><div><label class="fl">Direccion</label><input class="fi" value="Cl. 68 Sur #81-29, Bosa, Bogota" readonly></div><div><label class="fl">Fecha</label><div style="display:flex;gap:4px;"><input class="fi" id="rDD" placeholder="DD" value="${dd}" style="width:33%;"><input class="fi" id="rMM" placeholder="MM" value="${mm}" style="width:33%;"><input class="fi" id="rAA" placeholder="AA" value="${aa}" style="width:33%;"></div></div></div>
+            <div style="background:#1976d2;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">INFORMACION TECNICA</div>
+            <div class="fr"><div><label class="fl">Equipo</label><input class="fi" id="rEquipo" value="${e?.tipo ? e.tipo+' ' : ''}${e?.marca||''} ${e?.modelo||''}" readonly></div><div><label class="fl">Serial</label><input class="fi" id="rSerial" value="${e?.serie||''}" readonly></div></div>
+            <div><label class="fl">Ubicacion</label><input class="fi" id="rUbicacion" value="${e?.ubicacion||''}" readonly></div>
+            <div style="background:#1976d2;color:white;text-align:center;padding:4px;margin:10px 0 6px;border-radius:4px;">TIPO DE SERVICIO</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">${['Mantenimiento Preventivo','Mantenimiento Correctivo','Instalacion','Garantia','Revision'].map(t=>`<label><input type="radio" name="rTipoSrv" value="${t}" ${t==='Mantenimiento Preventivo'?'checked':''}> ${t}</label>`).join('')}</div>
+            <label class="fl">Descripcion del trabajo realizado *</label>
+            <textarea class="fi" id="rDesc" rows="3" placeholder="Trabajo realizado..."></textarea>
+            <label class="fl">Repuestos cambiados</label>
+            <textarea class="fi" id="rRepuestos" rows="2" placeholder="NA si no aplica..."></textarea>
+            <div class="fr"><div><label class="fl">Hora entrada</label><input class="fi" type="time" id="rHEntrada"></div><div><label class="fl">Hora salida</label><input class="fi" type="time" id="rHSalida"></div></div>
+            <label class="fl">Nombre quien recibe</label>
+            <input class="fi" id="rRecibe" placeholder="Nombre y cargo...">
+            <label class="fl">Firma</label>
+            <canvas id="rFirmaCanvas" width="300" height="80" style="width:100%;height:80px;border:1.5px dashed #1976d2;border-radius:8px;background:#e8f4fd;"></canvas>
+            <button class="btn btn-gray btn-sm" onclick="limpiarFirmaRO()">🗑 Limpiar firma</button>
+            <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-sm" style="background:#1976d2;color:white;" onclick="exportarInformeRO('${eid}')">📄 Exportar PDF</button></div>
+        </div>
+    </div>`);
+    setTimeout(() => iniciarFirmaCanvas('rFirmaCanvas'), 100);
+}
+function generarYGuardarExcelSemanal(srv, fotos, html) { console.log('Excel semanal - pendiente'); }
+
+// ============================================
+// INICIALIZACIÓN
+// ============================================
+document.querySelectorAll('.bni').forEach(btn=>{ btn.addEventListener('click',()=>{ const page=btn.dataset.page; if(!sesionActual&&page!=='panel'&&page!=='tecnicos'){ toast('🔒 Inicia sesion desde Tecnicos'); return; } selectedClienteId=null; selectedEquipoId=null; goTo(page); }); });
+
+function descargarHistorialCliente(cid) {
+    const c = getCl(cid);
+    const eqs = equipos.filter(e => e.clienteId === cid);
+    const esD1c = esClienteD1(cid);
+    const esJMCc = esClienteJMC ? esClienteJMC(cid) : false;
+    const filas = [['Cliente','Ciudad','Tipo Equipo','Marca','Modelo','Serie','Ubicacion','Estado Equipo','Fecha Servicio','Tipo Servicio','Tecnico','Descripcion']];
+    eqs.forEach(e => {
+        // Ciudad: usar tienda si es D1 o JMC, sino ciudad del cliente
+        let ciudad = c?.ciudad || '';
+        if (esD1c && e.idTienda) {
+            const t = getTiendaD1(e.idTienda);
+            if (t?.ciudad) ciudad = t.ciudad;
+        } else if (esJMCc && e.idTienda) {
+            const t = jmcTiendas?.find(x => String(x.idTienda) === String(e.idTienda));
+            if (t?.ciudad) ciudad = t.ciudad;
+        }
+        const ss = getServiciosEquipo(e.id).sort((a,b) => new Date(b.fecha)-new Date(a.fecha));
+        if (!ss.length) {
+            filas.push([c?.nombre||'', ciudad, e.tipo||'', e.marca||'', e.modelo||'', e.serie||'', e.ubicacion||'', e.estado||'Sin info', '', '', '', '']);
+        } else {
+            ss.forEach(s => {
+                filas.push([
+                    c?.nombre||'', ciudad,
+                    e.tipo||'', e.marca||'', e.modelo||'', e.serie||'', e.ubicacion||'',
+                    e.estado||'Sin info',
+                    s.fecha||'', s.tipo||'', s.tecnico||'',
+                    s.falla ? `${s.falla} | ${s.trabajoRealizado||''} | ${s.condicionEntrega||''}` : s.descripcion||''
+                ]);
+            });
+        }
+    });
+    const bom = '\uFEFF';
+    const csv = bom + filas.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv],{type:'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href=url; a.download=`Historial_${c?.nombre||cid}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+    toast('✅ Excel descargado');
 }
 
 function generarInformePDF(eid) {
-    const e=getEq(eid); const ent=getEntidad(e.clienteId); const ss=getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
-    const serviciosHTML=ss.map(s=>{ const fotosHTML=(s.fotos||[]).length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;">${(s.fotos||[]).map(f=>`<img src="${f}" style="height:80px;width:80px;object-fit:cover;border-radius:6px;border:1px solid #ddd;">`).join('')}</div>`:''; const proxHTML=(s.tipo==='Mantenimiento' && s.proximoMantenimiento)?`<div style="color:#b45309;font-size:16px;margin-top:4px;">&#128197; Proximo mantenimiento: ${fmtFecha(s.proximoMantenimiento)}</div>`:''; const estadoHTML=s.estadoReparacion?`<div style="font-size:12px;font-weight:bold;color:#d10000;margin-top:2px;">Estado: ${s.estadoReparacion}</div>`:''; return `<div style="border:1px solid #d1d5db;border-radius:8px;padding:12px;margin-bottom:10px;page-break-inside:avoid;"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><span style="background:${s.tipo==='Mantenimiento'?'#1d4ed8':s.tipo==='Reparacion'?'#dc2626':'#d10000'};color:white;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;">${s.tipo}</span><span style="font-size:16px;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:16px;color:#374151;margin:3px 0;">&#128295; ${s.tecnico}</div><div style="font-size:16px;color:#111;margin:3px 0;">${s.descripcion}</div>${estadoHTML}${fotosHTML}${proxHTML}</div>`; }).join('');
-    const coordinador=ent?.coordinador||'No asignado'; const telefonoCoord=ent?.telefono||'Sin teléfono';
-    const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Informe_${e?.marca}_${e?.modelo}</title><style>@page{size:letter;margin:15mm;}body{font-family:Arial,sans-serif;font-size:11px;color:#111;}.header{text-align:center;margin-bottom:15px;}.coordinador{font-size:14px;font-weight:bold;color:#d10000;}.titulo{font-size:18px;font-weight:bold;margin-top:5px;}</style></head><body><div class="header"><div class="coordinador">Coordinador: ${coordinador} | Tel: ${telefonoCoord}</div><div class="titulo">INFORME TECNICO</div></div><table style="width:100%;border-collapse:collapse;margin-bottom:12px;"><tr><td style="padding:6px;background:#f1f5f9;border:1px solid #ddd;"><strong>Cliente:</strong> ${ent?.nombre||'N/A'}</td><td style="padding:6px;background:#f1f5f9;border:1px solid #ddd;"><strong>Generado:</strong> ${new Date().toLocaleString()}</td></tr><tr><td colspan="2" style="padding:6px;border:1px solid #ddd;"><strong>Activo:</strong> ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} &nbsp;&nbsp; <strong>Serial:</strong> ${e?.serie||'N/A'}</td></tr></table><div style="background:#d10000;color:white;font-weight:bold;padding:6px;margin-bottom:10px;">HISTORIAL DE SERVICIOS (${ss.length})</div>${serviciosHTML}</body></html>`;
-    const v=window.open('','_blank'); if(v){ v.document.open(); v.document.write(html); v.document.close(); setTimeout(()=>v.print(),500); }
+    const e = getEq(eid); const c = getCl(e?.clienteId);
+    const esD1c = esClienteD1(e?.clienteId);
+    const tienda = esD1c ? getTiendaD1(e?.idTienda) : null;
+    const nombreTienda = tienda?.tienda || '';
+    const ss = getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha));
+    const LOGO='https://raw.githubusercontent.com/capacitADA/JDARQ/main/JDARQ-logo.png';
+    const fila=(lbl,val)=>val?`<tr><td style="color:#64748b;padding:3px 8px 3px 0;white-space:nowrap;font-size:8.5pt;">${lbl}</td><td style="font-weight:600;font-size:8.5pt;">${val}</td></tr>`:'';
+    const COLOR_TIPO={'Mantenimiento':'#1e3d7a','Preventivo':'#1e3d7a','Correctivo':'#b45309','Emergencia':'#dc2626','Reparacion':'#dc2626','Instalacion':'#16a34a'};
+    const serviciosHTML=ss.map(s=>`
+        <div style="border:1px solid #dde3f0;border-radius:8px;padding:10px;margin-bottom:8px;break-inside:avoid;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <span style="background:${COLOR_TIPO[s.tipo]||'#1e3d7a'};color:white;padding:2px 8px;border-radius:10px;font-size:7.5pt;">${s.tipo}</span>
+                <span style="font-size:7.5pt;color:#64748b;">${fmtFecha(s.fecha)}</span>
+            </div>
+            <div style="font-size:8pt;">🔧 ${s.tecnico}</div>
+            <div style="font-size:8pt;margin-top:2px;">${s.descripcion}</div>
+            ${(s.fotos||[]).length?`<div style="margin-top:4px;">${(s.fotos||[]).map(f=>`<img src="${f}" style="height:46px;border-radius:4px;margin-right:4px;">`).join('')}</div>`:''}
+        </div>`).join('');
+    const html=`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<title>Informe</title>
+<style>@page{size:letter;margin:10mm;}body{font-family:Arial,sans-serif;font-size:9pt;margin:0;color:#1a202c;}.cols{column-count:2;column-gap:12px;}</style>
+</head><body>
+<div style="display:flex;align-items:center;background:#0c214a;color:white;padding:12px 18px;border-radius:10px;margin-bottom:10px;">
+  <img src="${LOGO}" style="height:42px;margin-right:14px;" onerror="this.style.display='none'">
+  <div>
+    <div style="font-size:14pt;font-weight:700;">INFORME TÉCNICO</div>
+    <div style="font-size:9pt;opacity:0.85;margin-top:2px;">JD Arquisoluciones S.A.S &nbsp;|&nbsp; 📞 313 329 2510</div>
+  </div>
+</div>
+<div style="background:#f1f5f9;border-radius:8px;padding:12px 16px;margin-bottom:10px;">
+  <div style="font-weight:700;font-size:9pt;color:#0c214a;margin-bottom:6px;">DATOS DEL EQUIPO</div>
+  <div style="display:flex;gap:20px;">
+    <table style="flex:1;border-collapse:collapse;">
+      ${fila('Cliente:', c?.nombre||'N/A')}
+      ${nombreTienda ? fila('Tienda:', nombreTienda) : ''}
+      ${fila('Activo:', ((e?.tipo||'')+' '+(e?.marca||'')+' '+(e?.modelo||'')).trim())}
+      ${fila('Serial:', e?.serie||'N/A')}
+    </table>
+    <table style="flex:1;border-collapse:collapse;">
+      ${fila('Refrigerante:', e?.refrigerante||'')}
+      ${fila('Capacidad:', e?.capacidad||'')}
+      ${fila('Voltaje:', e?.voltaje||'')}
+      ${fila('Año instalación:', e?.añoInstalacion||'')}
+      ${fila('Especialidad:', e?.especialidad||'')}
+    </table>
+  </div>
+</div>
+<div style="background:#0c214a;color:white;padding:5px 12px;border-radius:6px;font-weight:700;font-size:9pt;margin-bottom:8px;">HISTORIAL DE SERVICIOS (${ss.length})</div>
+<div class="cols">${serviciosHTML}</div>
+<p style="font-size:7pt;color:#aaa;margin-top:10px;border-top:1px solid #eee;padding-top:6px;">Generado: ${new Date().toLocaleString()} · JD Arquisoluciones S.A.S</p>
+</body></html>`;
+    const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const v=window.open(url,'_blank');
+    if(v) setTimeout(()=>v.print(),600);
 }
 
-function modalQR(eid) {
-    const e=getEq(eid); const ent=getEntidad(e.clienteId); const url=`${window.location.origin}${window.location.pathname}#/equipo/${eid}`;
-    const qrDiv=document.createElement('div'); qrDiv.style.cssText='position:fixed;top:-9999px;left:-9999px;width:300px;height:300px;'; document.body.appendChild(qrDiv);
-    const QRLib=window.QRCode; if(!QRLib){ toast('⚠️ QRCode.js no cargado'); return; }
-    new QRLib(qrDiv,{ text:url, width:300, height:300, colorDark:'#d10000', colorLight:'#ffffff' });
-    setTimeout(()=>{
-        const qrCanvas=qrDiv.querySelector('canvas');
-        const qrDataUrl=qrCanvas.toDataURL('image/png');
-        document.body.removeChild(qrDiv);
-        // Canvas final: header rojo con logo+nombre, QR centrado, footer
-        const W=420, PAD=16;
-        const HDR=72; // altura header
-        const QRS=300;
-        const FOOT=28;
-        const totalH=HDR+QRS+PAD+FOOT+PAD;
-        const compCanvas=document.createElement('canvas');
-        compCanvas.width=W; compCanvas.height=totalH;
-        const ctx=compCanvas.getContext('2d');
-        // Fondo blanco
-        ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,totalH);
-        // Borde rojo
-        ctx.strokeStyle='#d10000'; ctx.lineWidth=3; ctx.strokeRect(2,2,W-4,totalH-4);
-        // Header rojo
-        ctx.fillStyle='#d10000'; ctx.fillRect(2,2,W-4,HDR);
-        const eqLabel=`${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}`.trim();
-        const entLabel=ent?.nombre||'';
-        const logoImg=new Image(); const qrImg=new Image();
-        logoImg.crossOrigin='anonymous';
-        logoImg.src='https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png';
-        logoImg.onload=()=>{
-            // Logo pequeño izquierda del header
-            const lH=42; const lW=logoImg.width*(lH/logoImg.height);
-            ctx.drawImage(logoImg, PAD, (HDR-lH)/2, lW, lH);
-            // Texto derecha del logo
-            ctx.fillStyle='#ffffff'; ctx.textAlign='left';
-            ctx.font='bold 13px Arial';
-            ctx.fillText(eqLabel, PAD+lW+10, HDR/2-4);
-            ctx.font='11px Arial';
-            ctx.fillStyle='rgba(255,255,255,0.85)';
-            ctx.fillText('🏭 '+entLabel, PAD+lW+10, HDR/2+13);
-            // QR centrado
-            qrImg.onload=()=>{
-                ctx.drawImage(qrImg,(W-QRS)/2, HDR, QRS, QRS);
-                // Footer
-                ctx.fillStyle='#888'; ctx.font='10px Arial'; ctx.textAlign='center';
-                ctx.fillText('Escanea para ver historial y contactar soporte', W/2, HDR+QRS+PAD+14);
-                const compositeUrl=compCanvas.toDataURL('image/png');
-                showModal(`<div class="modal" style="max-width:360px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${compositeUrl}" style="width:100%;border-radius:8px;border:2px solid #d10000;"><a href="${compositeUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`);
-            };
-            qrImg.src=qrDataUrl;
-        };
-        logoImg.onerror=()=>{
-            // Sin logo: solo texto en header
-            ctx.fillStyle='#ffffff'; ctx.textAlign='center'; ctx.font='bold 14px Arial';
-            ctx.fillText(eqLabel, W/2, HDR/2-4);
-            ctx.font='11px Arial'; ctx.fillStyle='rgba(255,255,255,0.85)';
-            ctx.fillText(entLabel, W/2, HDR/2+13);
-            qrImg.onload=()=>{
-                ctx.drawImage(qrImg,(W-QRS)/2, HDR, QRS, QRS);
-                ctx.fillStyle='#888'; ctx.font='10px Arial'; ctx.textAlign='center';
-                ctx.fillText('Escanea para ver historial y contactar soporte', W/2, HDR+QRS+PAD+14);
-                const compositeUrl=compCanvas.toDataURL('image/png');
-                showModal(`<div class="modal" style="max-width:360px;"><div class="modal-h"><h3>📱 Codigo QR</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b" style="text-align:center;"><img src="${compositeUrl}" style="width:100%;border-radius:8px;border:2px solid #d10000;"><a href="${compositeUrl}" download="QR_${e?.marca}_${e?.modelo}.png" class="btn btn-blue btn-full" style="margin-top:8px;">⬇️ Descargar QR</a></div></div>`);
-            };
-            qrImg.src=qrDataUrl;
-        };
-    },200);
-}
 
-function manejarRutaQR() { const hash=window.location.hash; if(!hash.startsWith('#/equipo/')) return false; const eid=hash.replace('#/equipo/',''); const e=getEq(eid); if(!e) return false; const ent=getEntidad(e.clienteId); const ss=getServiciosEquipo(eid).sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); const main=document.getElementById('mainContent'); const topbar=document.querySelector('.topbar'); const botnav=document.querySelector('.botnav'); if(topbar) topbar.style.display='none'; if(botnav) botnav.style.display='none'; main.style.background='white'; const coordinador=ent?.coordinador||'Coordinador'; const telefono=ent?.telefono||'3239454477'; const waMsg=encodeURIComponent(`Hola ${coordinador}, necesito ayuda con el equipo ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''} del ${ent?.nombre||'CEDI/Tienda'}, podrías devolverme el mensaje`); const waUrl=`https://wa.me/57${telefono.replace(/\D/g,'')}?text=${waMsg}`; main.innerHTML=`<div style="max-width:600px;margin:0 auto;padding:1.5rem;"><div style="text-align:center;margin-bottom:0.75rem;"><img src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" style="height:56px;" onerror="this.style.display='none'"></div><div style="border:1px solid #ccc;border-radius:12px;padding:1rem;margin-bottom:0.75rem;"><h3 style="margin:0 0 6px;">${e.marca} ${e.tipo||''} ${e.modelo}</h3><p style="margin:2px 0;">👤 ${ent?.nombre||'Sin entidad'}</p><p style="margin:2px 0;font-size:0.8rem;color:#888;">Serie: ${e.serie||'N/A'}</p></div><a id="waBtn" href="${waUrl}" target="_blank" style="display:block;width:100%;box-sizing:border-box;background:#25D366;color:white;border:none;padding:14px;border-radius:12px;text-align:center;font-size:1rem;font-weight:700;text-decoration:none;margin-bottom:1rem;">📱 Contactar por WhatsApp</a><h3>Historial (${ss.length})</h3>${ss.map(s=>`<div style="border:1px solid #d1ede0;border-radius:10px;padding:0.85rem;margin-bottom:0.65rem;"><div style="display:flex;justify-content:space-between;"><strong>${s.tipo}</strong><span style="font-size:0.8rem;color:#555;">${fmtFecha(s.fecha)}</span></div><div style="font-size:0.85rem;">🔧 ${s.tecnico}</div><div style="font-size:0.85rem;margin-top:2px;">${s.descripcion}</div>${s.estadoReparacion?`<div style="font-size:0.82rem;color:#d10000;font-weight:700;margin-top:2px;">Estado: ${s.estadoReparacion}</div>`:''} ${s.proximoMantenimiento?`<div style="font-size:0.82rem;color:#b45309;margin-top:4px;">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`).join('')}</div>`; return true; }
 
-function renderServicios() { const años=[...new Set(servicios.map(s=>s.fecha?.slice(0,4)).filter(Boolean))].sort((a,b)=>b-a); const meses=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return `<div class="page"><div class="sec-head"><h2>Servicios</h2></div><div class="filtros"><select class="fi" id="fAnio"><option value="">Todos los años</option>${años.map(a=>`<option>${a}</option>`).join('')}</select><select class="fi" id="fMes"><option value="">Todos los meses</option>${meses.map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('')}</select><select class="fi" id="fTipo"><option value="">Todos los tipos</option><option>Mantenimiento</option><option>Reparacion</option><option>Instalacion</option></select><select class="fi" id="fCliente"><option value="">Todos los CEDIs/Tiendas</option>${[...clientes.map(c=>`<option value="cliente|${c.id}">CEDI: ${c.nombre}</option>`), ...tiendas.map(t=>`<option value="tienda|${t.id}">TIENDA: ${t.nombre}</option>`)]}</select><select class="fi" id="fTecnico"><option value="">Todos los tecnicos</option>${tecnicos.map(t=>`<option>${t.nombre}</option>`).join('')}</select><button class="btn btn-blue btn-full" onclick="aplicarFiltros()">Aplicar</button><button class="btn btn-gray btn-full" onclick="limpiarFiltros()">Limpiar</button></div><div id="listaServicios"></div></div>`; }
-function aplicarFiltros() { const anio=document.getElementById('fAnio')?.value||''; const mes=document.getElementById('fMes')?.value||''; const tipo=document.getElementById('fTipo')?.value||''; const filtroEntidad=document.getElementById('fCliente')?.value||''; const tec=document.getElementById('fTecnico')?.value||''; let filtrados=[...servicios].sort((a,b)=>new Date(b.fecha)-new Date(a.fecha)); if(anio) filtrados=filtrados.filter(s=>s.fecha?.startsWith(anio)); if(mes) filtrados=filtrados.filter(s=>s.fecha?.slice(5,7)===mes); if(tipo) filtrados=filtrados.filter(s=>s.tipo===tipo); if(filtroEntidad){ const [tipoEnt,id]=filtroEntidad.split('|'); if(tipoEnt==='cliente') filtrados=filtrados.filter(s=>getEquiposCliente(id).some(e=>e.id===s.equipoId)); else filtrados=filtrados.filter(s=>getEquiposTienda(id).some(e=>e.id===s.equipoId)); } if(tec) filtrados=filtrados.filter(s=>s.tecnico===tec); const el=document.getElementById('listaServicios'); if(!el) return; if(!filtrados.length){ el.innerHTML='<p class="cc-meta" style="text-align:center;">Sin resultados.</p>'; return; } el.innerHTML=filtrados.map(s=>{ const e=getEq(s.equipoId); const ent=getEntidad(e?.clienteId); return `<div class="si"><div class="si-top"><span class="badge ${s.tipo==='Mantenimiento'?'b-blue':s.tipo==='Reparacion'?'b-red':'b-green'}">${s.tipo}</span><span>${fmtFecha(s.fecha)}</span></div><div class="si-info">👤 ${ent?.nombre||'N/A'} · ${e?.marca||''} ${e?.tipo||''} ${e?.modelo||''}</div><div class="si-info">📍 ${e?.ubicacion||''} · 🔧 ${s.tecnico}</div>${s.estadoReparacion?`<div class="si-info"><strong>Estado:</strong> ${s.estadoReparacion}</div>`:''}<div class="si-info">${s.descripcion}</div>${s.proximoMantenimiento?`<div class="si-info" style="color:var(--gold);">📅 Proximo: ${fmtFecha(s.proximoMantenimiento)}</div>`:''}</div>`; }).join(''); }
-function limpiarFiltros() { ['fAnio','fMes','fTipo','fCliente','fTecnico'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; }); aplicarFiltros(); }
-function renderMantenimientos() { const MESES=['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE']; const año=new Date().getFullYear(); const mant=servicios.filter(s=>s.proximoMantenimiento); return `<div class="page"><div class="sec-head"><h2>Agenda ${año}</h2></div><div class="tbl-wrap"><table><thead><tr><th>Mes</th><th>Fecha</th><th>Cliente</th><th>Activo</th><th></th></tr></thead><tbody>${MESES.map((mes,idx)=>{ const mp=String(idx+1).padStart(2,'0'); const lista=mant.filter(m=>m.proximoMantenimiento?.startsWith(`${año}-${mp}`)); if(!lista.length) return `<tr><td style="color:var(--hint);">${mes}</td><td colspan="4" style="color:#cbd5e1;">—</td></tr>`; return lista.map((m,i)=>{ const e=getEq(m.equipoId); const ent=getEntidad(e?.clienteId); return `<tr>${i===0?`<td rowspan="${lista.length}" style="font-weight:700;background:var(--bg2);">${mes}</td>`:''}<td>${fmtFecha(m.proximoMantenimiento)}</td><td>${ent?.nombre||'N/A'}</td><td>${e?`${e.marca} ${e.tipo||''} ${e.modelo}`:'N/A'}</td><td><button class="rec-btn" onclick="modalRecordar('${e?.clienteId}','${e?.id}','${m.proximoMantenimiento}')">📱</button></td></tr>`; }).join(''); }).join('')}</tbody></table></div></div>`; }
-function obtenerGPS(latId,lngId) { if(!navigator.geolocation){ toast('⚠️ GPS no disponible'); return; } navigator.geolocation.getCurrentPosition(pos=>{ document.getElementById(latId).value=pos.coords.latitude.toFixed(6); document.getElementById(lngId).value=pos.coords.longitude.toFixed(6); toast('✅ Ubicacion capturada'); },()=>toast('⚠️ No se pudo obtener GPS')); }
-function modalRecordar(clienteId,equipoId,fecha) { const e=getEq(equipoId); const ent=getEntidad(clienteId); const fechaF=fmtFechaLarga(fecha); let tel,destinatario,msg; if(ent){ tel=ent.telefono; destinatario=`${ent.coordinador} · SAP ${ent.sap}`; msg=`Hola *${ent.coordinador}*, recordatorio: activo *${e?.marca} ${e?.tipo||''} ${e?.modelo}* (${ent.tipoEntidad==='cliente'?'CEDI':'Tienda'} ${ent.nombre}) requiere mantenimiento el *${fechaF}*. Confirmar visita. Coordinador Mtto 📞 3239454477`; } else { tel='3239454477'; destinatario='Coordinador'; msg=`Recordatorio: activo *${e?.marca} ${e?.modelo}* requiere mantenimiento el *${fechaF}*.`; } showModal(`<div class="modal"><div class="modal-h"><h3>📱 Recordatorio WhatsApp</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div class="ec-meta">Para <strong>${destinatario}</strong> · 📞 ${tel}</div><div class="wa-bubble">${msg}</div><textarea class="fi" id="waMsgEdit" rows="4">${msg}</textarea><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-wa" onclick="enviarWhatsApp('${tel}')">📱 Abrir WhatsApp</button></div></div></div>`); }
-function enviarWhatsApp(tel) { const msg=document.getElementById('waMsgEdit')?.value||''; const telLimpio='57'+tel.replace(/\D/g,''); window.open(`https://wa.me/${telLimpio}?text=${encodeURIComponent(msg)}`,'_blank'); closeModal(); toast('📱 WhatsApp abierto'); }
 
-function renderTecnicos() {
-    return `<div class="page"><div class="sec-head"><h2>Tecnicos (${tecnicos.length})</h2>${esAdmin()?`<button class="btn btn-blue btn-sm" onclick="modalNuevoTecnico()">+ Nuevo</button>`:''}</div>
-        ${tecnicos.map(t=>{ const esps=(t.especialidades||[]).map(id=>ESPECIALIDADES.find(e=>e.id===id)?.label||id); return `<div class="ec"><div style="display:flex;justify-content:space-between;"><div><div class="ec-name">${t.nombre}</div>${sesionActual?`<div class="ec-meta">${t.tipoDoc} ${t.cedula}</div>`:''}<div class="ec-meta">${t.cargo}</div><div class="ec-meta">📞 ${t.telefono}</div></div><div><span class="tc-rol-badge ${t.rol==='admin'?'rol-admin':'rol-tec'}">${t.rol==='admin'?'Admin':'Tecnico'}</span>${esAdmin()?`<div><button class="ib" onclick="modalEditarTecnico('${t.id}')">✏️</button><button class="ib" onclick="eliminarTecnico('${t.id}')">🗑️</button></div>`:''}</div></div>${sesionActual?`<div>${esps.map(e=>`<span class="esp-chip">${e}</span>`).join('')}</div>`:''}<div class="ec-meta">📍 ${t.region||'Sin region'}</div><button class="btn btn-blue btn-sm btn-full" onclick="abrirLogin('${t.id}')">🔑 Ingresar como ${t.nombre.split(' ')[0]}</button></div>`; }).join('')}
-        ${esAdmin()?`<div style="margin-top:1.2rem;background:white;border-radius:12px;padding:0.85rem;"><div style="font-weight:700;">🏪 Subida Masiva de CEDIs y Tiendas</div><div class="ec-meta">Sube un CSV con columnas: SAP, TIENDA, CIUDAD, DEPARTAMENTO, DIRECCION, COORDINADOR, CARGO, TELEFONO</div><label class="btn btn-blue btn-sm" style="display:inline-block;margin:4px;">📥 Subir CSV<input type="file" accept=".csv" style="display:none;" onchange="subirCSVJMC(this)"></label><button class="btn btn-gray btn-sm" onclick="descargarPlantillaCSV()">📄 Plantilla</button></div>`:''}
-    </div>`;
-}
 
-// FIX: abrirLogin ahora limpia mlPinActual correctamente antes de abrir el modal
-function abrirLogin(tid) {
-    mlPinActual = '';
-    const t=getTec(tid);
-    showModal(`<div class="modal" style="max-width:320px;"><div class="modal-h"><h3>🔑 Ingresar</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><div style="font-weight:700;">${t.nombre}</div><div class="ec-meta">${t.tipoDoc}</div><label class="fl">Cedula</label><input class="fi" id="mlCedula" type="number"><label class="fl">Clave (4 digitos)</label><div class="pin-display"><div class="pin-digit" id="mlpd0"></div><div class="pin-digit" id="mlpd1"></div><div class="pin-digit" id="mlpd2"></div><div class="pin-digit" id="mlpd3"></div></div><div class="numpad">${[1,2,3,4,5,6,7,8,9].map(n=>`<div class="num-btn" onclick="mlPin('${tid}',${n})">${n}</div>`).join('')}<div class="num-btn del" onclick="mlDel()">⌫</div><div class="num-btn zero" onclick="mlPin('${tid}',0)">0</div><div class="num-btn ok" onclick="mlLogin('${tid}')">✓</div></div><div id="mlMsg"></div><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="mlLogin('${tid}')">Ingresar</button></div></div></div>`);
-    // Inicializar display limpio tras render
-    setTimeout(() => mlUpdateDisplay(), 50);
-}
+window.imprimirQRTienda = (url, nombre) => {
+    const w = window.open('', '_blank');
+    w.document.write(`<!DOCTYPE html><html><head><title>QR ${nombre}</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"><\/script>
+    </head><body style="text-align:center;font-family:Arial;padding:2rem;">
+    <h2 style="font-size:14pt;">${nombre}</h2>
+    <div id="qr" style="display:inline-block;margin:1rem 0;"></div>
+    <div style="font-size:9pt;color:#555;">Escanea para ver activos e historial</div>
+    <script>new QRCode(document.getElementById('qr'),{text:'${url}',width:250,height:250});setTimeout(()=>window.print(),800);<\/script>
+    </body></html>`);
+};
 
-let mlPinActual='';
-function mlPin(tid,n){ if(mlPinActual.length>=4) return; mlPinActual+=String(n); mlUpdateDisplay(); if(mlPinActual.length===4) mlLogin(tid); }
-function mlDel(){ mlPinActual=mlPinActual.slice(0,-1); mlUpdateDisplay(); }
-function mlUpdateDisplay(){ for(let i=0;i<4;i++){ const d=document.getElementById('mlpd'+i); if(!d) return; d.className='pin-digit'; if(i<mlPinActual.length){ d.textContent='●'; d.classList.add('filled'); } else if(i===mlPinActual.length){ d.textContent='_'; d.classList.add('active'); } else { d.textContent=''; } } }
-function mlLogin(tid){
-    const t=getTec(tid);
-    const cedula=document.getElementById('mlCedula')?.value?.trim();
-    const msg=document.getElementById('mlMsg');
-    if(!cedula){ if(msg) msg.innerHTML='<div class="login-warn">⚠️ Cedula requerida</div>'; return; }
-    if(mlPinActual.length<4){ if(msg) msg.innerHTML='<div class="login-warn">⚠️ Clave de 4 digitos</div>'; return; }
-    if(String(t.cedula)!==String(cedula) || t.clave!==mlPinActual){ if(msg) msg.innerHTML='<div class="login-error">❌ Credenciales incorrectas</div>'; mlPinActual=''; mlUpdateDisplay(); return; }
-    sesionActual=t; mlPinActual=''; closeModal(); actualizarTopbar(); currentView='panel'; renderView(); toast(`✅ Bienvenido, ${t.nombre.split(' ')[0]}`);
-}
 
-function modalNuevoTecnico() {
-    showModal(`<div class="modal"><div class="modal-h"><h3>Nuevo tecnico</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre *</label><input class="fi" id="tNombre"><div class="fr"><div><label class="fl">Tipo Doc</label><select class="fi" id="tTipoDoc">${TIPOS_DOC.map(d=>`<option>${d}</option>`).join('')}</select></div><div><label class="fl">Cedula *</label><input class="fi" id="tCedula" type="number"></div></div><label class="fl">Telefono</label><input class="fi" id="tTel"><label class="fl">Cargo</label><input class="fi" id="tCargo"><label class="fl">Rol</label><select class="fi" id="tRol"><option value="tecnico">Tecnico</option><option value="admin">Admin</option></select><label class="fl">Clave (4 digitos) *</label><input class="fi" id="tClave" type="password" maxlength="4"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="guardarTecnico()">Guardar</button></div></div></div>`);
-}
+function manejarRutaQR() { const hash = window.location.hash; if (!hash.startsWith('#/equipo/')) return false; const eid = hash.replace('#/equipo/', ''); const e = getEq(eid); if (!e) return false; const c = getCl(e.clienteId); const esD1 = esClienteD1(e.clienteId); const tienda = esD1 ? getTiendaD1(e?.idTienda) : null; const main = document.getElementById('mainContent'); const topbar = document.querySelector('.topbar'); const botnav = document.querySelector('.botnav'); if (topbar) topbar.style.display = 'none'; if (botnav) botnav.style.display = 'none'; main.style.background = 'white'; const ss = getServiciosEquipo(eid).sort((a,b) => new Date(b.fecha)-new Date(a.fecha)); const waMsg = encodeURIComponent('Hola KRYOTEC, necesito ayuda con el ' + (e?.tipo||'') + ' ' + (e?.marca||'') + ' ' + (e?.modelo||'') + ' ubicado en ' + (e?.ubicacion||'') + ', pueden contactarme por favor'); const waUrl = 'https://wa.me/573105533937?text=' + waMsg; let html = ''; if (esD1 && tienda) { html = `<div style="max-width:600px;margin:0 auto;padding:1rem;"><div style="background:#0c214a;color:white;border-radius:12px;padding:16px;margin-bottom:12px;"><div style="font-weight:700;">JD Arquisoluciones S.A.S</div><div style="font-size:1.2rem;font-weight:700;">${e?.tipo || 'Equipo'} ${e?.marca || ''} ${e?.modelo || ''}</div><div>${tienda.tienda || e?.ubicacion || ''}</div></div><div style="background:white;border:1px solid #ccc;border-radius:12px;padding:12px;"><div style="font-weight:700;">🔧 DATOS TÉCNICOS</div><table style="width:100%;"><tr><td>Marca/Modelo</td><td>${e?.marca || ''} ${e?.modelo || ''}</td></tr><tr><td>Serie</td><td>${e?.serie || 'N/A'}</td></tr></table></div><div style="background:#25D366;border-radius:12px;padding:12px;text-align:center;margin-top:12px;"><a href="${waUrl}" target="_blank" style="color:white;text-decoration:none;font-weight:700;">📱 Contactar por WhatsApp</a></div>${sesionActual ? `<button onclick="modalActaD1('${eid}')" class="btn-d1-nuevo" style="background:#e4002b;color:white;width:100%;padding:12px;margin-top:12px;border-radius:12px;">📋 Nuevo servicio D1</button>` : `<div style="background:#fef2f2;padding:12px;margin-top:12px;text-align:center;"><button onclick="mostrarLoginQR('${eid}')" class="btn btn-blue">Iniciar sesión</button></div>`}<h3>Historial (${ss.length})</h3>${ss.map(s => `<div style="border:1px solid #ccc;padding:8px;margin-top:8px;"><div>${fmtFecha(s.fecha)} - ${s.tipo}</div><div>${s.descripcion}</div></div>`).join('')}</div>`; } else { html = `<div style="max-width:600px;margin:0 auto;padding:1rem;"><div style="background:#0c214a;color:white;border-radius:12px;padding:16px;"><div>JD Arquisoluciones S.A.S</div><div>${e?.tipo || ''} ${e?.marca || ''} ${e?.modelo || ''}</div><div>${e?.ubicacion || ''}</div></div><div style="background:#25D366;border-radius:12px;padding:12px;text-align:center;margin-top:12px;"><a href="${waUrl}" target="_blank" style="color:white;text-decoration:none;">📱 Contactar por WhatsApp</a></div><h3>Historial (${ss.length})</h3>${ss.map(s => `<div style="border:1px solid #ccc;padding:8px;margin-top:8px;"><div>${fmtFecha(s.fecha)} - ${s.tipo}</div><div>${s.descripcion}</div></div>`).join('')}</div>`; } main.innerHTML = html; return true; }
+window.mostrarLoginQR = async (eid) => { const tecnicosList = tecnicos.filter(t => t.rol === 'tecnico' || t.rol === 'admin'); if (tecnicosList.length === 0) { toast('⚠️ No hay técnicos registrados'); return; } let options = '<option value="">Seleccionar técnico</option>'; tecnicosList.forEach(t => { options += `<option value="${t.id}">${t.nombre}</option>`; }); showModal(`<div class="modal" style="max-width:320px;"><div class="modal-h"><h3>🔐 Iniciar sesión</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Técnico</label><select class="fi" id="qrLoginTecnico">${options}</select><label class="fl">Clave (4 dígitos)</label><input class="fi" type="password" id="qrLoginClave" maxlength="4"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="ejecutarLoginQR('${eid}')">Ingresar</button></div></div></div>`); };
+window.ejecutarLoginQR = async (eid) => { const tecId = document.getElementById('qrLoginTecnico')?.value; const clave = document.getElementById('qrLoginClave')?.value; if (!tecId || !clave) { toast('⚠️ Selecciona técnico e ingresa clave'); return; } const tec = getTec(tecId); if (!tec || tec.clave !== clave) { toast('❌ Credenciales incorrectas'); return; } sesionActual = tec; actualizarTopbar(); closeModal(); toast(`✅ Bienvenido, ${tec.nombre.split(' ')[0]}`); manejarRutaQR(); setTimeout(() => modalActaD1(eid), 500); };
 
-async function guardarTecnico() {
-    const n=document.getElementById('tNombre')?.value?.trim(); const cc=document.getElementById('tCedula')?.value?.trim(); const cl=document.getElementById('tClave')?.value?.trim();
-    if(!n||!cc||!cl){ toast('⚠️ Nombre, cedula y clave requeridos'); return; }
-    if(cl.length!==4){ toast('⚠️ Clave de 4 digitos'); return; }
+
+window.actualizarServicioD1 = async (sid) => {
+    const tipo    = document.getElementById('esTipo')?.value;
+    const fecha   = document.getElementById('esFecha')?.value;
+    const falla   = document.getElementById('esFalla')?.value?.trim();
+    const trabajo = document.getElementById('esTrabajo')?.value?.trim();
+    const entrega = document.getElementById('esEntrega')?.value?.trim();
+    const estado  = document.getElementById('esEstado')?.value;
+    const obs     = document.getElementById('esObs')?.value?.trim();
+    const s = servicios.find(x => x.id === sid); if (!s) return;
     try {
-        await addDoc(collection(db,'tecnicos'),{ nombre:n, cedula:cc, tipoDoc:document.getElementById('tTipoDoc')?.value||'CC', telefono:document.getElementById('tTel')?.value||'', cargo:document.getElementById('tCargo')?.value||'', rol:document.getElementById('tRol')?.value||'tecnico', especialidades:[], region:'', clave:cl });
-        closeModal(); await cargarDatos(); toast('✅ Tecnico guardado');
-    } catch(err){ toast('❌ Error: '+err.message); }
-}
+        await updateDoc(doc(db,'servicios',sid), {
+            tipo, fecha, falla, trabajoRealizado: trabajo,
+            condicionEntrega: entrega, estadoEntrega: estado, observaciones: obs,
+            descripcion: `[D1] ${falla} | ${trabajo} | ${entrega} | Estado: ${estado}`
+        });
+        await updateDoc(doc(db,'equipos',s.equipoId), { estado });
+        toast('✅ Servicio actualizado'); closeModal(); await cargarDatos();
+    } catch(err) { toast('⚠️ Error: ' + err.message); }
+};
 
-function modalEditarTecnico(tid) { const t=getTec(tid); showModal(`<div class="modal"><div class="modal-h"><h3>Editar tecnico</h3><button class="xbtn" onclick="closeModal()">✕</button></div><div class="modal-b"><label class="fl">Nombre</label><input class="fi" id="etNombreTec" value="${t.nombre}"><label class="fl">Cedula</label><input class="fi" id="etCedulaTec" value="${t.cedula}"><label class="fl">Telefono</label><input class="fi" id="etTelTec" value="${t.telefono}"><label class="fl">Cargo</label><input class="fi" id="etCargoTec" value="${t.cargo||''}"><label class="fl">Rol</label><select class="fi" id="etRolTec"><option value="tecnico" ${t.rol==='tecnico'?'selected':''}>Tecnico</option><option value="admin" ${t.rol==='admin'?'selected':''}>Admin</option></select><label class="fl">Nueva clave (opcional)</label><input class="fi" id="etClaveTec" type="password" maxlength="4"><div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cancelar</button><button class="btn btn-blue" onclick="actualizarTecnico('${tid}')">Guardar</button></div></div></div>`); }
+window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarEquipos=filtrarEquipos; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.guardarCliente=guardarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.actualizarEquipo=actualizarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.guardarServicio=guardarServicio; window.actualizarServicio=actualizarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.guardarTecnico=guardarTecnico; window.actualizarTecnico=actualizarTecnico; window.eliminarTecnico=eliminarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.modalActaD1=modalActaD1; window.limpiarFirmaD1=limpiarFirmaD1; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR;
+window.descargarHistorialCliente=descargarHistorialCliente; window.obtenerGPS=obtenerGPS; window.modalInformeJMC=modalInformeJMC; window.modalInformeRO=modalInformeRO; window.actualizarServicioD1=actualizarServicioD1; window.exportarActaD1=exportarActaD1;
 
-// FIX: IDs renombrados en modalEditarTecnico para evitar colisión con modalEditarCliente/Tienda (etNombre, etTel, etCargo, etRol eran compartidos)
-async function actualizarTecnico(tid) {
-    const data={
-        nombre: document.getElementById('etNombreTec').value,
-        cedula: document.getElementById('etCedulaTec').value,
-        telefono: document.getElementById('etTelTec').value,
-        cargo: document.getElementById('etCargoTec').value,
-        rol: document.getElementById('etRolTec').value
-    };
-    const newClave=document.getElementById('etClaveTec')?.value?.trim();
-    if(newClave && newClave.length===4) data.clave=newClave;
-    try { await updateDoc(doc(db,'tecnicos',tid),data); closeModal(); await cargarDatos(); toast('✅ Tecnico actualizado'); } catch(err){ toast('❌ Error: '+err.message); }
-}
-
-async function eliminarTecnico(tid) { if(!confirm('¿Eliminar este tecnico?')) return; try{ await deleteDoc(doc(db,'tecnicos',tid)); await cargarDatos(); toast('🗑️ Tecnico eliminado'); } catch(err){ toast('❌ Error: '+err.message); } }
-
-// FIX: subirCSVJMC ahora parsea CSV correctamente respetando campos con comas entre comillas
-async function subirCSVJMC(input) {
-    const file=input.files[0]; if(!file) return;
-    const reader=new FileReader();
-    reader.onload=async ev=>{
-        const lines=ev.target.result.split('\n').filter(l=>l.trim());
-        if(lines.length<2){ toast('⚠️ CSV vacío'); return; }
-        // Parser CSV que respeta comillas
-        function parseCSVLine(line) {
-            const result=[]; let cur=''; let inQ=false;
-            for(let i=0;i<line.length;i++){
-                const ch=line[i];
-                if(ch==='"'){ inQ=!inQ; }
-                else if(ch===',' && !inQ){ result.push(cur.trim()); cur=''; }
-                else { cur+=ch; }
-            }
-            result.push(cur.trim());
-            return result;
+// ============================================
+// ============================================
+// QR APROBACIÓN — JEFE DE TIENDA
+// ============================================
+async function generarQRAprobacion(sid) {
+    const token  = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const expira = new Date(Date.now() + 30*60*1000).toISOString();
+    try {
+        await setDoc(doc(db,'aprobaciones',token), {
+            servicioId: sid, expira, usado: false,
+            creadoEn: new Date().toISOString()
+        });
+        const url = `${location.origin}${location.pathname}#/aprobar/${token}`;
+        showModal(`<div class="modal" style="max-width:340px;">
+          <div class="modal-h" style="background:#1a1a1a;border-bottom:2px solid #C9A84C;">
+            <h3 style="color:#C9A84C;">📱 QR para jefe de tienda</h3>
+            <button class="xbtn" style="color:white;" onclick="closeModal()">✕</button>
+          </div>
+          <div class="modal-b" style="text-align:center;">
+            <div style="font-size:.78rem;color:#555;margin-bottom:.75rem;">Muestra este QR al jefe de tienda para que firme desde su celular</div>
+            <div id="qrAprobRender" style="display:inline-block;margin-bottom:.5rem;"></div>
+            <div style="font-size:.68rem;color:#94a3b8;margin-bottom:.75rem;">Expira en 30 minutos · Un solo uso</div>
+            <div class="modal-foot"><button class="btn btn-gray" onclick="closeModal()">Cerrar</button></div>
+          </div>
+        </div>`);
+        if (window.QRCode) {
+            new QRCode(document.getElementById('qrAprobRender'), { text: url, width: 220, height: 220 });
+        } else {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+            s.onload = () => new QRCode(document.getElementById('qrAprobRender'), { text: url, width: 220, height: 220 });
+            document.head.appendChild(s);
         }
-        const encabezados=parseCSVLine(lines[0]).map(h=>h.replace(/^"|"$/g,'').trim().toUpperCase());
-        const idx=(col)=>encabezados.indexOf(col);
-        const iSap=idx('SAP'),iTienda=idx('TIENDA'),iCiudad=idx('CIUDAD'),iDepto=idx('DEPARTAMENTO'),iDir=idx('DIRECCION'),iCoord=idx('COORDINADOR'),iCargo=idx('CARGO'),iTel=idx('TELEFONO');
-        if(iSap===-1||iTienda===-1){ toast('⚠️ El CSV debe tener columnas SAP y TIENDA'); return; }
-        const cedis=[]; const tiendasCSV=[];
-        for(let i=1;i<lines.length;i++){
-            const cols=parseCSVLine(lines[i]).map(c=>c.replace(/^"|"$/g,''));
-            const sap=cols[iSap]?.trim(); const nombre=cols[iTienda]?.trim();
-            if(!sap||!nombre) continue;
-            const item={
-                sap, nombre,
-                ciudad: iCiudad!==-1?(cols[iCiudad]||''):'',
-                departamento: iDepto!==-1?(cols[iDepto]||''):'',
-                direccion: iDir!==-1?(cols[iDir]||''):'',
-                coordinador: iCoord!==-1?(cols[iCoord]||''):'',
-                cargo: iCargo!==-1?(cols[iCargo]||''):'',
-                telefono: iTel!==-1?(cols[iTel]||''):'',
-                latitud:'', longitud:''
-            };
-            if(nombre.toUpperCase().includes('CEDI')) cedis.push(item); else tiendasCSV.push(item);
-        }
-        const guardarBatch=async(items,coleccion)=>{
-            const batch=writeBatch(db); const colRef=collection(db,coleccion);
-            for(const item of items){ batch.set(doc(colRef),item); }
-            await batch.commit();
-        };
-        try {
-            if(cedis.length) await guardarBatch(cedis,'clientes');
-            if(tiendasCSV.length) await guardarBatch(tiendasCSV,'tiendas');
-            input.value=''; await cargarDatos(); toast(`✅ ${cedis.length} CEDIs y ${tiendasCSV.length} Tiendas guardadas`);
-        } catch(err){ toast('❌ Error CSV: '+err.message); }
-    };
-    reader.readAsText(file,'UTF-8');
+    } catch(e) { toast('⚠️ Error generando QR: ' + e.message); }
 }
 
-function descargarPlantillaCSV() { const enc='SAP,TIENDA,CIUDAD,DEPARTAMENTO,DIRECCION,COORDINADOR,CARGO,TELEFONO'; const ejemplo='170,Chia - Centro - Calle 13,Chia,Cundinamarca,Calle 13 # 9-43,Edgar Amado,Coordinador Sr Mantenimiento,3107935104'; const csv=[enc,ejemplo].join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='plantilla_cedis_tiendas.csv'; a.click(); URL.revokeObjectURL(url); toast('📄 Plantilla descargada'); }
-function puedeEditar(creadoPor) { return esAdmin() || sesionActual?.nombre === creadoPor; }
+function manejarRutaAprobacion() {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#/aprobar/')) return false;
+    const token = hash.replace('#/aprobar/', '');
+    const main  = document.getElementById('mainContent');
+    const topbar = document.querySelector('.topbar');
+    const botnav = document.querySelector('.botnav');
+    if (topbar) topbar.style.display = 'none';
+    if (botnav) botnav.style.display = 'none';
+    main.innerHTML = `
+      <div style="max-width:420px;margin:0 auto;padding:1rem;">
+        <div style="background:#1a1a1a;color:white;border-radius:12px;padding:14px;margin-bottom:12px;border-bottom:3px solid #C9A84C;text-align:center;">
+          <img src="https://raw.githubusercontent.com/capacitADA/JDARQ/main/JDARQ-logo.png" style="height:40px;margin-bottom:8px;" onerror="this.style.display='none'">
+          <div style="color:#C9A84C;font-weight:700;">Aprobación de servicio</div>
+        </div>
+        <div id="qrAprobContenido">
+          <div style="text-align:center;padding:2rem;color:#94a3b8;">Cargando...</div>
+        </div>
+      </div>`;
+    cargarAprobacionQR(token);
+    return true;
+}
 
-window.exportarHistorialEntidad=exportarHistorialEntidad; window.exportarHistorialExcel=exportarHistorialExcel; window.goTo=goTo; window.closeModal=closeModal; window.filtrarClientes=filtrarClientes; window.filtrarTiendas=filtrarTiendas; window.aplicarFiltros=aplicarFiltros; window.limpiarFiltros=limpiarFiltros; window.modalNuevoCliente=modalNuevoCliente; window.modalEditarCliente=modalEditarCliente; window.modalEliminarCliente=modalEliminarCliente; window.actualizarCliente=actualizarCliente; window.modalNuevaTienda=modalNuevaTienda; window.modalEditarTienda=modalEditarTienda; window.modalEliminarTienda=modalEliminarTienda; window.actualizarTienda=actualizarTienda; window.modalNuevoEquipo=modalNuevoEquipo; window.modalEditarEquipo=modalEditarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.guardarEquipo=guardarEquipo; window.modalNuevoServicio=modalNuevoServicio; window.modalEditarServicio=modalEditarServicio; window.eliminarServicio=eliminarServicio; window.modalNuevoTecnico=modalNuevoTecnico; window.modalEditarTecnico=modalEditarTecnico; window.modalRecordar=modalRecordar; window.enviarWhatsApp=enviarWhatsApp; window.generarInformePDF=generarInformePDF; window.modalQR=modalQR; window.obtenerGPS=obtenerGPS; window.previewFoto=previewFoto; window.borrarFoto=borrarFoto; window.onTipoChange=onTipoChange; window.onEditTipoChange=onEditTipoChange; window.abrirLogin=abrirLogin; window.mlPin=mlPin; window.mlDel=mlDel; window.mlLogin=mlLogin; window.cerrarSesion=cerrarSesion; window.subirCSVJMC=subirCSVJMC; window.descargarPlantillaCSV=descargarPlantillaCSV; window.guardarCliente=guardarCliente; window.guardarTienda=guardarTienda; window.guardarTecnico=guardarTecnico; window.actualizarTecnico=actualizarTecnico; window.eliminarTecnico=eliminarTecnico; window.actualizarServicio=actualizarServicio; window.guardarServicio=guardarServicio; window.actualizarEquipo=actualizarEquipo; window.modalEliminarEquipo=modalEliminarEquipo; window.eliminarEquipo=eliminarEquipo; window.modalEliminarCliente=modalEliminarCliente; window.modalEliminarTienda=modalEliminarTienda;
-window.modalCotizaciones=modalCotizaciones; window.modalNuevaCotizacion=modalNuevaCotizacion; window.guardarCotizacion=guardarCotizacion; window.modalEditarCotizacion=modalEditarCotizacion; window.avanzarEstadoCotizacion=avanzarEstadoCotizacion; window.eliminarCotizacion=eliminarCotizacion; window.exportarCotizacionesEntidad=exportarCotizacionesEntidad;
+async function cargarAprobacionQR(token) {
+    const cont = document.getElementById('qrAprobContenido');
+    try {
+        const snap = await getDoc(doc(db,'aprobaciones',token));
+        if (!snap.exists()) { cont.innerHTML = '<div style="background:#fee2e2;color:#991b1b;padding:1rem;border-radius:8px;">❌ Link inválido o expirado</div>'; return; }
+        const data = snap.data();
+        if (data.usado) { cont.innerHTML = '<div style="background:#fee2e2;color:#991b1b;padding:1rem;border-radius:8px;">❌ Este link ya fue utilizado</div>'; return; }
+        if (new Date(data.expira) < new Date()) { cont.innerHTML = '<div style="background:#fee2e2;color:#991b1b;padding:1rem;border-radius:8px;">❌ Este link expiró</div>'; return; }
+        const sSnap = await getDoc(doc(db,'servicios',data.servicioId));
+        if (!sSnap.exists()) { cont.innerHTML = '<div style="background:#fee2e2;color:#991b1b;padding:1rem;border-radius:8px;">❌ Servicio no encontrado</div>'; return; }
+        const s = { id: sSnap.id, ...sSnap.data() };
+        cont.innerHTML = `
+          <div style="background:white;border-radius:10px;padding:12px;border:1px solid #e0e0e0;margin-bottom:12px;">
+            <div style="font-weight:700;font-size:.9rem;margin-bottom:6px;color:#C9A84C;">📋 Orden ${s.idMtto||'—'}</div>
+            <div style="font-size:.78rem;color:#555;">🏪 ${s.tiendaNombre||s.tiendaCodigo||'—'}</div>
+            <div style="font-size:.78rem;color:#555;">📅 ${s.fecha||''}</div>
+            <div style="font-size:.78rem;color:#555;">🔧 ${s.tecnico||'—'}</div>
+            <div style="font-size:.78rem;color:#555;margin-top:4px;">${(s.actividades||'').slice(0,120)}</div>
+          </div>
+          <div style="background:white;border-radius:10px;padding:12px;border:1px solid #e0e0e0;margin-bottom:12px;">
+            <label style="display:block;font-size:.7rem;font-weight:700;color:#555;text-transform:uppercase;margin-bottom:4px;">Tu número de celular</label>
+            <input id="qrJefeCel" type="tel" placeholder="3XX XXX XXXX" style="width:100%;border:1.5px solid #e0e0e0;border-radius:8px;padding:.5rem .75rem;font-size:.9rem;margin-bottom:10px;">
+            <label style="display:block;font-size:.7rem;font-weight:700;color:#555;text-transform:uppercase;margin-bottom:4px;">Tu firma</label>
+            <canvas id="firmaJefeCanvas" style="width:100%;height:110px;border:2px dashed #e0e0e0;border-radius:8px;background:white;touch-action:none;display:block;"></canvas>
+            <button onclick="document.getElementById('firmaJefeCanvas').getContext('2d').clearRect(0,0,1000,300)" style="background:none;border:1px solid #e0e0e0;border-radius:6px;padding:4px 10px;font-size:.72rem;margin-top:4px;cursor:pointer;">Limpiar</button>
+          </div>
+          <div style="font-size:.7rem;color:#94a3b8;margin-bottom:12px;">Al firmar confirmas que el servicio fue realizado a satisfacción. Tu celular, firma y ubicación quedan registrados.</div>
+          <button onclick="confirmarQRAprobacion('${token}','${s.id}')" style="background:#C9A84C;color:#1a1a1a;font-weight:700;border:none;border-radius:10px;padding:.85rem;width:100%;font-size:.95rem;cursor:pointer;">✅ Aprobar y firmar</button>`;
+        setTimeout(() => {
+            const canvas = document.getElementById('firmaJefeCanvas');
+            if (!canvas) return;
+            canvas.width = canvas.offsetWidth || 340;
+            canvas.height = 110;
+            const ctx = canvas.getContext('2d');
+            let drawing = false, lx = 0, ly = 0;
+            const pos = ev => { const r=canvas.getBoundingClientRect(); const s=ev.touches?ev.touches[0]:ev; return [s.clientX-r.left,s.clientY-r.top]; };
+            canvas.addEventListener('mousedown',  e => { drawing=true; [lx,ly]=pos(e); });
+            canvas.addEventListener('mousemove',  e => { if(!drawing) return; const [x,y]=pos(e); ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(x,y); ctx.strokeStyle='#1a1a6e'; ctx.lineWidth=2; ctx.lineCap='round'; ctx.stroke(); [lx,ly]=[x,y]; });
+            canvas.addEventListener('mouseup',    () => drawing=false);
+            canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing=true; [lx,ly]=pos(e); }, {passive:false});
+            canvas.addEventListener('touchmove',  e => { e.preventDefault(); if(!drawing) return; const [x,y]=pos(e); ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(x,y); ctx.strokeStyle='#1a1a6e'; ctx.lineWidth=2; ctx.lineCap='round'; ctx.stroke(); [lx,ly]=[x,y]; }, {passive:false});
+            canvas.addEventListener('touchend',   () => drawing=false);
+        }, 100);
+    } catch(e) {
+        cont.innerHTML = `<div style="background:#fee2e2;color:#991b1b;padding:1rem;border-radius:8px;">⚠️ Error: ${e.message}</div>`;
+    }
+}
 
-document.querySelectorAll('.bni').forEach(btn=>{ btn.addEventListener('click',()=>{ const page=btn.dataset.page; if(!sesionActual && page!=='panel' && page!=='tecnicos'){ toast('🔒 Inicia sesion desde Tecnicos'); return; } goTo(page); }); });
+async function confirmarQRAprobacion(token, sid) {
+    const cel    = document.getElementById('qrJefeCel')?.value?.trim();
+    const canvas = document.getElementById('firmaJefeCanvas');
+    if (!cel) { alert('⚠️ Ingresa tu número de celular'); return; }
+    const firma = canvas ? canvas.toDataURL('image/png') : '';
+    let gps = null;
+    try { gps = await new Promise(res => navigator.geolocation.getCurrentPosition(p => res({lat:p.coords.latitude,lng:p.coords.longitude}), () => res(null), {timeout:5000})); } catch(e) {}
+    try {
+        await updateDoc(doc(db,'servicios',sid), {
+            aprobado: true, pendienteAprobacion: false,
+            aprobadoEn: new Date().toISOString(),
+            firmaJefeQR: firma, celularJefe: cel,
+            gpsJefe: gps, userAgentJefe: navigator.userAgent
+        });
+        await updateDoc(doc(db,'aprobaciones',token), { usado: true });
+        document.getElementById('qrAprobContenido').innerHTML = `
+          <div style="text-align:center;padding:2rem;">
+            <div style="font-size:3rem;margin-bottom:.75rem;">✅</div>
+            <div style="font-weight:700;font-size:1.1rem;color:#16a34a;">¡Aprobado!</div>
+            <div style="font-size:.82rem;color:#555;margin-top:.35rem;">Orden cerrada correctamente</div>
+          </div>`;
+    } catch(e) { alert('⚠️ Error al aprobar: ' + e.message); }
+}
 
-(async()=>{ await conectarDriveAuto(); await cargarDatos(); if(!manejarRutaQR()) renderView(); })();
+// QR TIENDA — FICHA PÚBLICA
+// ============================================
+function modalQRTienda(tid) {
+    const t = getTienda(tid);
+    if (!t) { toast('⚠️ Tienda no encontrada'); return; }
+    const url = `${window.location.origin}${window.location.pathname}#/tienda/${tid}`;
+    const qrDiv = document.createElement('div');
+    qrDiv.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:260px;height:260px;';
+    document.body.appendChild(qrDiv);
+    new window.QRCode(qrDiv, { text: url, width: 260, height: 260 });
+    setTimeout(() => {
+        const qrDataUrl = qrDiv.querySelector('canvas')?.toDataURL('image/png') || '';
+        document.body.removeChild(qrDiv);
+        showModal(`<div class="modal"><div class="modal-h" style="background:var(--negro);"><h3 style="color:var(--dorado);">📱 QR Tienda</h3><button class="xbtn" style="color:white;" onclick="closeModal()">✕</button></div>
+        <div class="modal-b" style="text-align:center;">
+            <div style="font-weight:700;font-size:.95rem;margin-bottom:.25rem;">${t.nombre}</div>
+            <div style="font-size:.78rem;color:#555;margin-bottom:.75rem;">${t.municipio} · ${t.departamento} · Cód: ${t.codigo}</div>
+            <img src="${qrDataUrl}" style="width:200px;height:200px;border:1px solid #eee;border-radius:8px;">
+            <div style="font-size:.72rem;color:#94a3b8;margin-top:.5rem;">Escanear para ver ficha de la tienda</div>
+            <div class="modal-foot" style="justify-content:center;">
+                <a href="${url}" target="_blank" class="btn btn-gold btn-sm">🔗 Abrir ficha</a>
+                <button class="btn btn-gray btn-sm" onclick="closeModal()">Cerrar</button>
+            </div>
+        </div></div>`);
+    }, 300);
+}
+
+function manejarRutaTienda() {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#/tienda/')) return false;
+    const tid = hash.replace('#/tienda/', '');
+    const t   = getTienda(tid);
+    if (!t) return false;
+    const c   = getCl(t.clienteId);
+    const eqs = getEquiposTienda(tid);
+    const incs = servicios.filter(s => eqs.some(e => e.id === s.equipoId));
+    const topbar = document.querySelector('.topbar');
+    const botnav = document.querySelector('.botnav');
+    if (topbar) topbar.style.display = 'none';
+    if (botnav) botnav.style.display = 'none';
+    document.getElementById('mainContent').innerHTML = `
+        <div style="max-width:600px;margin:0 auto;padding:1rem;">
+            <div style="background:#1a1a1a;color:white;border-radius:12px;padding:16px;margin-bottom:12px;border-bottom:3px solid #C9A84C;">
+                <img src="https://raw.githubusercontent.com/capacitADA/JDARQ/main/JDARQ-logo.png" style="height:32px;margin-bottom:8px;" onerror="this.style.display='none'">
+                <div style="font-size:1.1rem;font-weight:700;color:#C9A84C;">${t.nombre}</div>
+                <div style="font-size:.78rem;color:rgba(255,255,255,.7);">${t.municipio}, ${t.departamento}</div>
+                <div style="font-size:.78rem;opacity:.7;">Código: ${t.codigo}</div>
+                ${t.latitud ? `<a href="https://maps.google.com/?q=${t.latitud},${t.longitud}" target="_blank" style="color:var(--dorado);font-size:.76rem;">🗺️ Ver en mapa</a>` : ''}
+            </div>
+
+            <div style="background:white;border-radius:10px;padding:12px;margin-bottom:12px;border:1px solid #e0e0e0;">
+                <div style="font-weight:700;font-size:.82rem;margin-bottom:8px;border-bottom:2px solid var(--dorado);padding-bottom:4px;">🔧 ACTIVOS (${eqs.length})</div>
+                ${eqs.length === 0 ? '<div style="color:#94a3b8;font-size:.78rem;">Sin activos registrados</div>' :
+                eqs.map(e => `
+                    <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:.78rem;">
+                        <span><strong>${e.nombre||e.tipo||'—'}</strong> · ${e.area||''}</span>
+                        <span style="color:${e.estado==='Operativo'?'#16a34a':'#dc2626'};">● ${e.estado||'—'}</span>
+                    </div>`).join('')}
+            </div>
+
+            <div style="background:white;border-radius:10px;padding:12px;border:1px solid #e0e0e0;">
+                <div style="font-weight:700;font-size:.82rem;margin-bottom:8px;border-bottom:2px solid var(--dorado);padding-bottom:4px;">📋 INCIDENCIAS (${incs.length})</div>
+                ${incs.length === 0 ? '<div style="color:#94a3b8;font-size:.78rem;">Sin incidencias registradas</div>' :
+                incs.slice(0,10).map(s => `
+                    <div style="padding:6px 0;border-bottom:1px solid #f5f5f5;font-size:.78rem;">
+                        <div style="display:flex;justify-content:space-between;">
+                            <strong style="color:var(--dorado);">#${s.nroIncidencia||s.id.slice(0,6)}</strong>
+                            <span style="color:#555;">${fmtFecha(s.fecha)}</span>
+                        </div>
+                        <div style="color:#555;">${s.descripcion?.slice(0,80)||''}${s.descripcion?.length>80?'...':''}</div>
+                        <div style="color:${s.aprobado?'#16a34a':'#f59e0b'};">${s.aprobado?'✅ Aprobada':'⏳ Pendiente'}</div>
+                    </div>`).join('')}
+            </div>
+        </div>`;
+    return true;
+}
+
+window.modalQRTienda = modalQRTienda;
+window.generarQRAprobacion = generarQRAprobacion;
+window.confirmarQRAprobacion = confirmarQRAprobacion;
+window.modalNuevaIncidencia = modalNuevaIncidencia;
+window.guardarIncidencia = guardarIncidencia;
+window.autocompletarTienda = autocompletarTienda;
+window.previewFotoOT = window.previewFotoOT;
+window.limpiarFirmaOT = window.limpiarFirmaOT;
+window.filtrarTiendasDetalle = filtrarTiendasDetalle;
+window.descargarHistorialTienda = descargarHistorialTienda;
+window.imprimirQRTienda = imprimirQRTienda;
+(async()=>{ await conectarDriveAuto(); await cargarDatos(); if(!manejarRutaQR() && !manejarRutaTienda()) renderView(); })()async function guardarEquipo(cid, tid){
+    const nombre = document.getElementById('eqNombre')?.value?.trim();
+    const desc   = document.getElementById('eqDesc')?.value?.trim()||'';
+    if (!nombre) { toast('⚠️ Nombre del activo requerido'); return; }
+    try {
+        await addDoc(collection(db,'equipos'),{
+            clienteId: cid,
+            tiendaId:  tid,
+            nombre,
+            descripcion: desc,
+            creadoEn: new Date().toISOString()
+        });
+        toast('✅ Activo guardado');
+        closeModal();
+        await cargarDatos();
+        renderView();
+    } catch(e) { toast('⚠️ Error: '+e.message); }
+}
+
+
+
+
+async 
+
+async 
+
+// ============================================
+// CARGA DE DATOS
+// ============================================
