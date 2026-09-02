@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Inspección Semanal - Bomba Contra Incendios</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+  :root{
+    --ink:#1c2230;
+    --line:#c9cfd8;
+    --line-light:#e3e7ec;
+    --accent:#b3261e;
+    --accent-soft:#f4e6e5;
+    --paper:#ffffff;
+    --muted:#5b6472;
+    --group-bg:#f6f7f9;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:#e9ebee;
+    font-family:'Segoe UI', Arial, sans-serif;
+    color:var(--ink);
+    padding:24px 0 60px;
+  }
+  #toolbar{
+    max-width:820px;
+    margin:0 auto 16px;
+    padding:0 20px;
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+  }
+  #toolbar button{
+    background:var(--accent);
+    color:#fff;
+    border:none;
+    padding:10px 18px;
+    font-size:14px;
+    font-weight:600;
+    border-radius:6px;
+    cursor:pointer;
+    letter-spacing:.2px;
+  }
+  #toolbar button.secondary{
+    background:#fff;
+    color:var(--ink);
+    border:1px solid var(--line);
+  }
+  #toolbar button:hover{opacity:.92;}
+
+  #sheet, #guideSheet{
+    max-width:820px;
+    margin:0 auto;
+    background:var(--paper);
+    padding:38px 42px 30px;
+    border:1px solid var(--line);
+    border-radius:4px;
+  }
+  #guideSheet{
+    margin-top:20px;
+    margin-bottom:20px;
+  }
+
+  .masthead{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:16px;
+    border-bottom:3px solid var(--accent);
+    padding-bottom:14px;
+    margin-bottom:22px;
+  }
+  .masthead .brand{
+    display:flex;
+    align-items:center;
+    gap:14px;
+  }
+  .masthead .logo{
+    height:78px;
+    width:auto;
+    flex-shrink:0;
+  }
+  .masthead h1{
+    font-size:19px;
+    margin:0 0 4px;
+    letter-spacing:.3px;
+  }
+  .masthead .sub{
+    font-size:12px;
+    color:var(--muted);
+    margin:0;
+  }
+  .masthead .tag{
+    font-size:11px;
+    color:var(--accent);
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    border:1px solid var(--accent);
+    padding:4px 10px;
+    border-radius:3px;
+    white-space:nowrap;
+  }
+
+  .meta{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px 28px;
+    margin-bottom:22px;
+    font-size:13px;
+  }
+  .field{
+    display:flex;
+    align-items:flex-end;
+    gap:6px;
+    border-bottom:1px solid var(--line);
+    padding-bottom:4px;
+  }
+  .field label{
+    color:var(--muted);
+    white-space:nowrap;
+    font-size:12px;
+  }
+  .field input{
+    border:none;
+    outline:none;
+    font-size:13px;
+    font-family:inherit;
+    flex:1;
+    background:transparent;
+    color:var(--ink);
+  }
+
+  .group-title{
+    background:var(--group-bg);
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.6px;
+    color:var(--accent);
+    padding:6px 10px;
+    margin:18px 0 4px;
+    border-left:3px solid var(--accent);
+    page-break-after:avoid;
+    break-after:avoid;
+  }
+
+  table.items{
+    width:100%;
+    border-collapse:collapse;
+    font-size:12.5px;
+  }
+  table.items tr{
+    border-bottom:1px solid var(--line-light);
+    page-break-inside:avoid;
+    break-inside:avoid;
+  }
+  table.items td{
+    padding:7px 6px;
+    vertical-align:top;
+  }
+  td.desc{
+    line-height:1.35;
+  }
+  td.opts{
+    white-space:nowrap;
+    width:150px;
+    text-align:left;
+  }
+  .opt{
+    display:inline-flex;
+    align-items:center;
+    gap:3px;
+    margin-right:10px;
+    font-size:12px;
+  }
+  .opt input[type=radio]{
+    width:13px;
+    height:13px;
+    accent-color:var(--accent);
+    margin:0;
+  }
+  .hour-input{
+    border:none;
+    border-bottom:1px solid var(--line);
+    outline:none;
+    font-size:12.5px;
+    font-family:inherit;
+    width:130px;
+    background:transparent;
+    color:var(--ink);
+  }
+
+  .comments{
+    margin-top:22px;
+  }
+  .comments .group-title{margin-bottom:6px;}
+  .comments textarea{
+    width:100%;
+    min-height:70px;
+    border:1px solid var(--line);
+    border-radius:3px;
+    padding:8px 10px;
+    font-family:inherit;
+    font-size:12.5px;
+    resize:vertical;
+    color:var(--ink);
+  }
+
+  .signoff{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:14px 28px;
+    margin-top:22px;
+    font-size:13px;
+  }
+  .signoff .field{grid-column:span 1;}
+  .signoff .full{grid-column:1 / -1;}
+  .sig-field{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    border-bottom:none;
+    gap:6px;
+  }
+  .sig-field label{margin-bottom:2px;}
+  #sigPad{
+    width:100%;
+    max-width:700px;
+    height:120px;
+    border:1px solid var(--line);
+    border-radius:4px;
+    background:#fafbfc;
+    touch-action:none;
+    cursor:crosshair;
+  }
+  .clear-sig{
+    background:none;
+    border:1px solid var(--line);
+    color:var(--muted);
+    font-size:11px;
+    padding:4px 10px;
+    border-radius:4px;
+    cursor:pointer;
+  }
+  @media print{
+    .clear-sig{display:none;}
+  }
+
+  .footer-note{
+    margin-top:26px;
+    font-size:10px;
+    color:var(--muted);
+    border-top:1px solid var(--line-light);
+    padding-top:8px;
+  }
+
+  @media print{
+    body{background:#fff;padding:0;}
+    #toolbar{display:none;}
+    #sheet, #guideSheet{border:none;border-radius:0;max-width:100%;padding:24px 30px;}
+    .guide-sheet{page-break-before:always; margin-top:0;}
+  }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button class="secondary" onclick="document.querySelectorAll('input, textarea').forEach(el=>{if(el.type==='radio'){el.checked=false}else{el.value=''}})">Limpiar formulario</button>
+  <button onclick="downloadPDF()">Descargar PDF</button>
+</div>
+
+<div id="pdfContent">
+<div id="sheet">
+
+  <div class="masthead">
+    <div class="brand">
+      <img class="logo" src="https://raw.githubusercontent.com/capacitADA/D-one/main/D1_logo.png" alt="Logo D1" onerror="this.style.display='none'">
+      <div>
+        <h1>Inspección Semanal — Bomba Contra Incendios</h1>
+        <p class="sub">Basado en Anexo 8.21, NFPA 25 (Inspección, Prueba y Mantenimiento de sistemas de protección contra incendios a base de agua)</p>
+      </div>
+    </div>
+    <div class="tag" id="weekTag">Semana —</div>
+  </div>
+
+  <div class="meta">
+    <div class="field"><label>Nombre del inmueble</label><input type="text" id="nombreInmueble"></div>
+    <div class="field"><label>Fecha</label><input type="date" id="fechaInspeccion"></div>
+    <div class="field"><label>Dirección</label><input type="text"></div>
+    <div class="field"><label>Ciudad</label><input type="text"></div>
+  </div>
+
+  <div class="group-title">Sala de bombas</div>
+  <table class="items">
+    <tr><td class="desc">La temperatura en la sala de bombas es de 40 °F (4 °C) o superior.</td><td class="opts"><label class="opt"><input type="radio" name="q1" value="si"> Sí</label><label class="opt"><input type="radio" name="q1" value="no"> No</label><label class="opt"><input type="radio" name="q1" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Las rejillas de entrada de aire en la sala de bombas parecen funcionar correctamente.</td><td class="opts"><label class="opt"><input type="radio" name="q2" value="si"> Sí</label><label class="opt"><input type="radio" name="q2" value="no"> No</label><label class="opt"><input type="radio" name="q2" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">La temperatura en la sala de la bomba no es inferior a 21 °C (70 °F) para la bomba de motor diésel sin calentador de motor.</td><td class="opts"><label class="opt"><input type="radio" name="q3" value="si"> Sí</label><label class="opt"><input type="radio" name="q3" value="no"> No</label><label class="opt"><input type="radio" name="q3" value="nc"> N/C</label></td></tr>
+  </table>
+
+  <div class="group-title">Sistemas de la bomba</div>
+  <table class="items">
+    <tr><td class="desc">Las válvulas de succión, descarga y derivación de la bomba deben estar abiertas.</td><td class="opts"><label class="opt"><input type="radio" name="q4" value="si"> Sí</label><label class="opt"><input type="radio" name="q4" value="no"> No</label><label class="opt"><input type="radio" name="q4" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">No existen fugas en las tuberías ni en las mangueras.</td><td class="opts"><label class="opt"><input type="radio" name="q5" value="si"> Sí</label><label class="opt"><input type="radio" name="q5" value="no"> No</label><label class="opt"><input type="radio" name="q5" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">La bomba contra incendios pierde una gota de agua por segundo en las uniones.</td><td class="opts"><label class="opt"><input type="radio" name="q6" value="si"> Sí</label><label class="opt"><input type="radio" name="q6" value="no"> No</label><label class="opt"><input type="radio" name="q6" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">La presión de la línea de <strong>Entrada/Succión</strong> es normal.</td><td class="opts"><label class="opt"><input type="radio" name="q7" value="si"> Sí</label><label class="opt"><input type="radio" name="q7" value="no"> No</label><label class="opt"><input type="radio" name="q7" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">La presión de la línea de <strong>Salida/Descarga</strong> es normal.</td><td class="opts"><label class="opt"><input type="radio" name="q8" value="si"> Sí</label><label class="opt"><input type="radio" name="q8" value="no"> No</label><label class="opt"><input type="radio" name="q8" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">El depósito de succión está lleno.</td><td class="opts"><label class="opt"><input type="radio" name="q9" value="si"> Sí</label><label class="opt"><input type="radio" name="q9" value="no"> No</label><label class="opt"><input type="radio" name="q9" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Las mallas de succión de la fosa no están obstruidas y están en su sitio.</td><td class="opts"><label class="opt"><input type="radio" name="q10" value="si"> Sí</label><label class="opt"><input type="radio" name="q10" value="no"> No</label><label class="opt"><input type="radio" name="q10" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Las válvulas de prueba de flujo de agua están en posición cerrada.</td><td class="opts"><label class="opt"><input type="radio" name="q11" value="si"> Sí</label><label class="opt"><input type="radio" name="q11" value="no"> No</label><label class="opt"><input type="radio" name="q11" value="nc"> N/C</label></td></tr>
+  </table>
+
+  <div class="group-title">Sistemas eléctricos</div>
+  <table class="items">
+    <tr><td class="desc">La luz del piloto del controlador (encendido) está iluminada.</td><td class="opts"><label class="opt"><input type="radio" name="q12" value="si"> Sí</label><label class="opt"><input type="radio" name="q12" value="no"> No</label><label class="opt"><input type="radio" name="q12" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">El nivel de aceite en la mirilla vertical del motor es normal.</td><td class="opts"><label class="opt"><input type="radio" name="q17" value="si"> Sí</label><label class="opt"><input type="radio" name="q17" value="no"> No</label><label class="opt"><input type="radio" name="q17" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">La bomba de mantenimiento de la presión (jockey) tiene energía.</td><td class="opts"><label class="opt"><input type="radio" name="q18" value="si"> Sí</label><label class="opt"><input type="radio" name="q18" value="no"> No</label><label class="opt"><input type="radio" name="q18" value="nc"> N/C</label></td></tr>
+  </table>
+
+  <div class="group-title">Sistemas del motor diésel</div>
+  <table class="items">
+    <tr><td class="desc">El tanque de combustible diésel está lleno al menos en dos tercios de su capacidad.</td><td class="opts"><label class="opt"><input type="radio" name="q19" value="si"> Sí</label><label class="opt"><input type="radio" name="q19" value="no"> No</label><label class="opt"><input type="radio" name="q19" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">El interruptor selector del controlador está en la posición "auto" (funcionamiento automático).</td><td class="opts"><label class="opt"><input type="radio" name="q20" value="si"> Sí</label><label class="opt"><input type="radio" name="q20" value="no"> No</label><label class="opt"><input type="radio" name="q20" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Las lecturas de tensión de las baterías (2) son normales.</td><td class="opts"><label class="opt"><input type="radio" name="q21" value="si"> Sí</label><label class="opt"><input type="radio" name="q21" value="no"> No</label><label class="opt"><input type="radio" name="q21" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Las lecturas de corriente de carga de las baterías son normales.</td><td class="opts"><label class="opt"><input type="radio" name="q22" value="si"> Sí</label><label class="opt"><input type="radio" name="q22" value="no"> No</label><label class="opt"><input type="radio" name="q22" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Los pilotos de las baterías están "encendidos" o los pilotos de falla de batería están "apagados".</td><td class="opts"><label class="opt"><input type="radio" name="q23" value="si"> Sí</label><label class="opt"><input type="radio" name="q23" value="no"> No</label><label class="opt"><input type="radio" name="q23" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Todas las luces piloto de alarma están "apagadas".</td><td class="opts"><label class="opt"><input type="radio" name="q24" value="si"> Sí</label><label class="opt"><input type="radio" name="q24" value="no"> No</label><label class="opt"><input type="radio" name="q24" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Registre el tiempo de funcionamiento del motor desde el medidor de horas.</td><td class="opts"><input type="text" class="hour-input" placeholder="___ horas"></td></tr>
+    <tr><td class="desc">El nivel de aceite es normal en las bombas de engranajes de ángulo recto.</td><td class="opts"><label class="opt"><input type="radio" name="q26" value="si"> Sí</label><label class="opt"><input type="radio" name="q26" value="no"> No</label><label class="opt"><input type="radio" name="q26" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">El nivel de aceite del cárter es normal.</td><td class="opts"><label class="opt"><input type="radio" name="q27" value="si"> Sí</label><label class="opt"><input type="radio" name="q27" value="no"> No</label><label class="opt"><input type="radio" name="q27" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">El nivel de agua de refrigeración es normal.</td><td class="opts"><label class="opt"><input type="radio" name="q28" value="si"> Sí</label><label class="opt"><input type="radio" name="q28" value="no"> No</label><label class="opt"><input type="radio" name="q28" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">El nivel de electrolitos en las baterías es normal.</td><td class="opts"><label class="opt"><input type="radio" name="q29" value="si"> Sí</label><label class="opt"><input type="radio" name="q29" value="no"> No</label><label class="opt"><input type="radio" name="q29" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Los terminales de la batería están libres de corrosión.</td><td class="opts"><label class="opt"><input type="radio" name="q30" value="si"> Sí</label><label class="opt"><input type="radio" name="q30" value="no"> No</label><label class="opt"><input type="radio" name="q30" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">El calentador de la camisa de agua funciona correctamente.</td><td class="opts"><label class="opt"><input type="radio" name="q31" value="si"> Sí</label><label class="opt"><input type="radio" name="q31" value="no"> No</label><label class="opt"><input type="radio" name="q31" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">El nivel de electrolito del sistema de la batería está lleno.</td><td class="opts"><label class="opt"><input type="radio" name="q32" value="si"> Sí</label><label class="opt"><input type="radio" name="q32" value="no"> No</label><label class="opt"><input type="radio" name="q32" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">La tensión de arranque de la batería es superior a 9 voltios (sistema de 12V) o 18 voltios (sistema de 24V).</td><td class="opts"><label class="opt"><input type="radio" name="q33" value="si"> Sí</label><label class="opt"><input type="radio" name="q33" value="no"> No</label><label class="opt"><input type="radio" name="q33" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">La(s) bomba(s) de agua no tiene(n) fugas.</td><td class="opts"><label class="opt"><input type="radio" name="q34" value="si"> Sí</label><label class="opt"><input type="radio" name="q34" value="no"> No</label><label class="opt"><input type="radio" name="q34" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">La manguera flexible y las conexiones están en buen estado.</td><td class="opts"><label class="opt"><input type="radio" name="q35" value="si"> Sí</label><label class="opt"><input type="radio" name="q35" value="no"> No</label><label class="opt"><input type="radio" name="q35" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Funciona correctamente el calentador de aceite lubricante.</td><td class="opts"><label class="opt"><input type="radio" name="q36" value="si"> Sí</label><label class="opt"><input type="radio" name="q36" value="no"> No</label><label class="opt"><input type="radio" name="q36" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Compruebe si hay agua en el tanque de combustible diésel.</td><td class="opts"><label class="opt"><input type="radio" name="q37" value="si"> Sí</label><label class="opt"><input type="radio" name="q37" value="no"> No</label><label class="opt"><input type="radio" name="q37" value="nc"> N/C</label></td></tr>
+  </table>
+
+  <div class="group-title">Sistema de escape</div>
+  <table class="items">
+    <tr><td class="desc">Examine el sistema de escape en busca de fugas.</td><td class="opts"><label class="opt"><input type="radio" name="q39" value="si"> Sí</label><label class="opt"><input type="radio" name="q39" value="no"> No</label><label class="opt"><input type="radio" name="q39" value="nc"> N/C</label></td></tr>
+    <tr><td class="desc">Vacíe el sifón de condensados.</td><td class="opts"><label class="opt"><input type="radio" name="q40" value="si"> Sí</label><label class="opt"><input type="radio" name="q40" value="no"> No</label><label class="opt"><input type="radio" name="q40" value="nc"> N/C</label></td></tr>
+  </table>
+
+  <div class="comments">
+    <div class="group-title">Comentarios</div>
+    <textarea placeholder="Observaciones adicionales..."></textarea>
+  </div>
+
+  <div class="signoff">
+    <div class="field"><label>Nombre de quien inspeccionó</label><input type="text"></div>
+    <div class="field"><label>Cargo</label><input type="text"></div>
+    <div class="field full sig-field">
+      <label>Firma</label>
+      <canvas id="sigPad" width="700" height="120"></canvas>
+      <button type="button" class="clear-sig" onclick="clearSignature()">Borrar firma</button>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    Formato de inspección semanal de bomba contra incendios. Consulte los requisitos específicos de las entidades y jurisdicciones locales aplicables.
+  </div>
+
+</div>
+
+<div id="guideSheet" class="guide-sheet html2pdf__page-break">
+
+  <div class="masthead" style="border-bottom-color:var(--line);">
+    <div>
+      <h1 style="font-size:16px;">Guía de referencia — Línea de succión y descarga</h1>
+      <p class="sub">Diagrama de apoyo para ubicar los puntos de inspección de la bomba contra incendios</p>
+    </div>
+  </div>
+
+  <img src="https://raw.githubusercontent.com/capacitADA/D-one/main/grafico-bomba.jpg" alt="Diagrama de bomba contra incendios" style="width:100%; height:auto; margin-top:10px; border:1px solid var(--line); border-radius:4px;">
+
+  <div class="footer-note" style="margin-top:18px;">
+    La <strong>línea de entrada/succión</strong> lleva el agua desde el tanque hasta la bomba; la <strong>malla o colador de succión</strong> impide que sedimento o basura entren a la bomba. La <strong>línea de salida/descarga</strong> lleva el agua ya presurizada desde la bomba hacia la red contra incendios del edificio.
+  </div>
+
+</div>
+</div>
+
+<script>
+// --- Número de semana ---
+function getISOWeek(date){
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+function updateWeekTag(){
+  const input = document.getElementById('fechaInspeccion');
+  const date = input.value ? new Date(input.value + 'T00:00:00') : new Date();
+  document.getElementById('weekTag').textContent = 'Semana ' + getISOWeek(date);
+}
+document.getElementById('fechaInspeccion').addEventListener('change', updateWeekTag);
+updateWeekTag();
+
+// --- Firma táctil (dedo/mouse) ---
+const sigPad = document.getElementById('sigPad');
+const sigCtx = sigPad.getContext('2d');
+sigCtx.lineWidth = 2.2;
+sigCtx.lineCap = 'round';
+sigCtx.strokeStyle = '#1c2230';
+let drawing = false;
+
+function getPos(e){
+  const rect = sigPad.getBoundingClientRect();
+  const scaleX = sigPad.width / rect.width;
+  const scaleY = sigPad.height / rect.height;
+  const point = e.touches ? e.touches[0] : e;
+  return {
+    x: (point.clientX - rect.left) * scaleX,
+    y: (point.clientY - rect.top) * scaleY
+  };
+}
+function startDraw(e){
+  drawing = true;
+  const p = getPos(e);
+  sigCtx.beginPath();
+  sigCtx.moveTo(p.x, p.y);
+  e.preventDefault();
+}
+function moveDraw(e){
+  if(!drawing) return;
+  const p = getPos(e);
+  sigCtx.lineTo(p.x, p.y);
+  sigCtx.stroke();
+  e.preventDefault();
+}
+function endDraw(e){
+  drawing = false;
+}
+sigPad.addEventListener('mousedown', startDraw);
+sigPad.addEventListener('mousemove', moveDraw);
+sigPad.addEventListener('mouseup', endDraw);
+sigPad.addEventListener('mouseleave', endDraw);
+sigPad.addEventListener('touchstart', startDraw, {passive:false});
+sigPad.addEventListener('touchmove', moveDraw, {passive:false});
+sigPad.addEventListener('touchend', endDraw);
+
+function clearSignature(){
+  sigCtx.clearRect(0, 0, sigPad.width, sigPad.height);
+}
+
+function downloadPDF(){
+  const el = document.getElementById('pdfContent');
+
+  // Nombre de archivo automático: semana + nombre del inmueble
+  const weekText = document.getElementById('weekTag').textContent.trim(); // "Semana 36"
+  const weekNum = weekText.replace(/[^0-9]/g, '') || 'SN';
+  const nombreInmueble = document.getElementById('nombreInmueble').value.trim();
+  const slug = (nombreInmueble || 'inmueble')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quitar tildes
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+  const filename = `inspeccion-semana${weekNum}-${slug}.pdf`;
+
+  const opt = {
+    margin: 0,
+    filename: filename,
+    image: { type: 'jpeg', quality: 0.98 },
+    html2canvas: { scale: 2, useCORS: true, allowTaint: true },
+    jsPDF: { unit: 'pt', format: 'letter', orientation: 'portrait' },
+    pagebreak: { mode: ['css','legacy'] }
+  };
+  html2pdf().set(opt).from(el).save();
+}
+</script>
+
+</body>
+</html>
